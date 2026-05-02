@@ -1,6 +1,7 @@
 annotated-doc==0.0.4
 anyio==4.13.0
 certifi==2026.4.22
+charset-normalizer==3.4.7
 click==8.3.3
 filelock==3.29.0
 fsspec==2026.4.0
@@ -27,6 +28,7 @@ PyQt6-Qt6==6.11.0
 PyQt6_sip==13.11.1
 PyYAML==6.0.3
 regex==2026.4.4
+requests==2.33.1
 rich==15.0.0
 safetensors==0.7.0
 sentencepiece==0.2.1
@@ -36,3 +38,4 @@ tqdm==4.67.3
 transformers==5.7.0
 typer==0.25.1
 typing_extensions==4.15.0
+urllib3==2.6.3

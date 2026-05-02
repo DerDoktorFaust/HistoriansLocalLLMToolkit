@@ -1,10 +1,8 @@
-import sys
 import traceback
 from pathlib import Path
 
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSettings
 from PyQt6.QtWidgets import (
-    QApplication,
     QWidget,
     QLabel,
     QPushButton,
@@ -12,20 +10,20 @@ from PyQt6.QtWidgets import (
     QFileDialog,
     QVBoxLayout,
     QHBoxLayout,
-    QGroupBox,
     QFormLayout,
     QLineEdit,
     QMessageBox,
+    QDialog,
+    QDialogButtonBox,
+    QGroupBox,
 )
-
-
-# ------------------------------------------------------------
-# TEMPORARY PLACEHOLDER FUNCTIONS
-# Replace these with imports from your real project modules.
-# ------------------------------------------------------------
 
 from src.summarizer.summarizer_core import run_summarizer
 
+
+# ------------------------------------------------------------
+# Backend functions
+# ------------------------------------------------------------
 
 def summarize_pdf(pdf_path: Path, model_path: str, progress_callback):
     return run_summarizer(
@@ -40,7 +38,7 @@ def ocr_pdf(pdf_path: Path, model_path: str, progress_callback):
     progress_callback(f"PDF: {pdf_path}")
     progress_callback(f"Model path/server: {model_path}")
 
-    # TODO: Replace this with your actual OCR pipeline.
+    # TODO: Replace this with your real OCR pipeline.
     return f"# OCR Output\n\nOCR text from PDF: `{pdf_path.name}`\n"
 
 
@@ -49,8 +47,61 @@ def translate_pdf(pdf_path: Path, model_path: str, progress_callback):
     progress_callback(f"PDF: {pdf_path}")
     progress_callback(f"Model path/server: {model_path}")
 
-    # TODO: Replace this with your actual translation pipeline.
+    # TODO: Replace this with your real translation pipeline.
     return f"# Translation\n\nTranslated PDF: `{pdf_path.name}`\n"
+
+
+# ------------------------------------------------------------
+# Settings Dialog
+# ------------------------------------------------------------
+
+class SettingsDialog(QDialog):
+    def __init__(self, settings: QSettings, parent=None):
+        super().__init__(parent)
+
+        self.settings = settings
+        self.setWindowTitle("Settings")
+        self.resize(650, 160)
+
+        self.model_path_input = QLineEdit()
+        self.model_path_input.setPlaceholderText("Path to local model or LM Studio server URL")
+        self.model_path_input.setText(self.settings.value("model_path", ""))
+
+        self.browse_model_button = QPushButton("Browse")
+        self.browse_model_button.clicked.connect(self.choose_model_path)
+
+        model_path_layout = QHBoxLayout()
+        model_path_layout.addWidget(self.model_path_input)
+        model_path_layout.addWidget(self.browse_model_button)
+
+        form_layout = QFormLayout()
+        form_layout.addRow("Model path / server URL:", model_path_layout)
+
+        self.buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Save
+            | QDialogButtonBox.StandardButton.Cancel
+        )
+        self.buttons.accepted.connect(self.save_settings)
+        self.buttons.rejected.connect(self.reject)
+
+        main_layout = QVBoxLayout()
+        main_layout.addLayout(form_layout)
+        main_layout.addWidget(self.buttons)
+
+        self.setLayout(main_layout)
+
+    def choose_model_path(self):
+        path = QFileDialog.getExistingDirectory(
+            self,
+            "Choose Model Directory",
+            "",
+        )
+        if path:
+            self.model_path_input.setText(path)
+
+    def save_settings(self):
+        self.settings.setValue("model_path", self.model_path_input.text().strip())
+        self.accept()
 
 
 # ------------------------------------------------------------
@@ -111,7 +162,7 @@ class DropArea(QLabel):
         self.setText("Drag and drop a PDF here\nor click to choose one")
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setAcceptDrops(True)
-        self.setMinimumHeight(160)
+        self.setMinimumHeight(170)
         self.setStyleSheet("""
             QLabel {
                 border: 2px dashed #777;
@@ -152,7 +203,7 @@ class HistorianToolkitGUI(QWidget):
         super().__init__()
 
         self.setWindowTitle("Local LLM Toolkit for Historical Text Analysis")
-        self.resize(800, 650)
+        self.resize(850, 650)
 
         self.settings = QSettings("GoodwinDH", "LocalLLMToolkit")
         self.pdf_path: Path | None = None
@@ -166,23 +217,15 @@ class HistorianToolkitGUI(QWidget):
         self.summarize_button = QPushButton("Summarize")
         self.ocr_button = QPushButton("OCR")
         self.translate_button = QPushButton("Translate")
+        self.settings_button = QPushButton("Settings")
 
         self.summarize_button.clicked.connect(lambda: self.start_task("summarize"))
         self.ocr_button.clicked.connect(lambda: self.start_task("ocr"))
         self.translate_button.clicked.connect(lambda: self.start_task("translate"))
+        self.settings_button.clicked.connect(self.open_settings)
 
         self.progress_output = QTextEdit()
         self.progress_output.setReadOnly(True)
-
-        self.model_path_input = QLineEdit()
-        self.model_path_input.setPlaceholderText("Path to local model or LM Studio server URL")
-        self.model_path_input.setText(self.settings.value("model_path", ""))
-
-        self.browse_model_button = QPushButton("Browse")
-        self.browse_model_button.clicked.connect(self.choose_model_path)
-
-        self.save_settings_button = QPushButton("Save Settings")
-        self.save_settings_button.clicked.connect(self.save_settings)
 
         self.build_layout()
 
@@ -196,20 +239,8 @@ class HistorianToolkitGUI(QWidget):
         button_layout.addWidget(self.summarize_button)
         button_layout.addWidget(self.ocr_button)
         button_layout.addWidget(self.translate_button)
+        button_layout.addWidget(self.settings_button)
         main_layout.addLayout(button_layout)
-
-        settings_group = QGroupBox("Settings")
-        settings_layout = QFormLayout()
-
-        model_path_layout = QHBoxLayout()
-        model_path_layout.addWidget(self.model_path_input)
-        model_path_layout.addWidget(self.browse_model_button)
-
-        settings_layout.addRow("Model path / server URL:", model_path_layout)
-        settings_layout.addRow("", self.save_settings_button)
-
-        settings_group.setLayout(settings_layout)
-        main_layout.addWidget(settings_group)
 
         progress_group = QGroupBox("Progress Output")
         progress_layout = QVBoxLayout()
@@ -225,30 +256,27 @@ class HistorianToolkitGUI(QWidget):
         self.selected_pdf_label.setText(f"Selected PDF: {path}")
         self.log(f"Selected PDF: {path}")
 
-    def choose_model_path(self):
-        path = QFileDialog.getExistingDirectory(
-            self,
-            "Choose Model Directory",
-            "",
-        )
-        if path:
-            self.model_path_input.setText(path)
-
-    def save_settings(self):
-        self.settings.setValue("model_path", self.model_path_input.text().strip())
-        self.log("Settings saved.")
+    def open_settings(self):
+        dialog = SettingsDialog(self.settings, self)
+        if dialog.exec():
+            self.log("Settings saved.")
 
     def start_task(self, task_name: str):
         if self.pdf_path is None:
-            QMessageBox.warning(self, "No PDF Selected", "Please select a PDF first.")
+            QMessageBox.warning(
+                self,
+                "No PDF Selected",
+                "Please select a PDF first.",
+            )
             return
 
-        model_path = self.model_path_input.text().strip()
+        model_path = self.settings.value("model_path", "").strip()
+
         if not model_path:
             QMessageBox.warning(
                 self,
                 "Missing Model Setting",
-                "Please enter a model path or LM Studio server URL in Settings.",
+                "Please open Settings and enter a model path or LM Studio server URL.",
             )
             return
 
@@ -277,7 +305,6 @@ class HistorianToolkitGUI(QWidget):
         if save_path.suffix.lower() != ".md":
             save_path = save_path.with_suffix(".md")
 
-        self.save_settings()
         self.set_buttons_enabled(False)
 
         self.log(f"Starting task: {task_name}")
@@ -310,6 +337,7 @@ class HistorianToolkitGUI(QWidget):
         self.summarize_button.setEnabled(enabled)
         self.ocr_button.setEnabled(enabled)
         self.translate_button.setEnabled(enabled)
+        self.settings_button.setEnabled(enabled)
 
     def log(self, message: str):
         self.progress_output.append(message)
