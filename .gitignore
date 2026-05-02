@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Virtual environments
+venv/
+.env/
+
+# macOS
+.DS_Store
+
+# Logs
+logs/
+*.log
+
+# Project-specific
+input/
+output/
+
+# Large models / MLX / LM Studio
+models/
+*.bin
+*.gguf
+
+# VS Code
+.vscode/
+
+# Jupyter
+.ipynb_checkpoints/
