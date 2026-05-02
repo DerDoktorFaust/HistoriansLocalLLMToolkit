@@ -1,18 +1,21 @@
-import argparse
 import logging
 import time
 from pathlib import Path
 
-from .extractor import extract_pages
-from .chunker import chunk_pages
-from .classifier import classify_document
-from .llm import load_model, unload_model, MODEL_PATH
-from .summarizer import (
-    summarize_article,
-    summarize_book,
-    build_final_summary
+from src.summarizer.extractor import extract_pages
+from src.summarizer.chunker import chunk_pages
+from src.summarizer.classifier import classify_document
+from src.summarizer.llm import load_model, unload_model
+from src.summarizer.summarizer import (
+    summarize_chunk,
+    extract_compressed_notes,
+    synthesize_batches,
+    synthesize_final_summary,
+    verify_final_summary,
+    synthesize_article_summary,
+    verify_article_summary,
 )
-from .writer import write_markdown_output
+from src.summarizer.writer import write_markdown_output
 
 
 def setup_logging():
@@ -26,28 +29,60 @@ def setup_logging():
         format="%(asctime)s [%(levelname)s] %(message)s",
         handlers=[
             logging.FileHandler(log_path),
-            logging.StreamHandler()
-        ]
+            logging.StreamHandler(),
+        ],
+        force=True,
     )
 
     return log_path
 
 
-def run_summarizer(pdf_path, output_dir=None, progress_callback=None):
-    log_path = setup_logging()
+def build_markdown(
+    final_summary,
+    verification_report,
+    batch_summaries,
+    chunk_summaries,
+    source_file,
+    model_name=None,
+):
+    temp_output_path = Path("__temp_summary_output.md")
+
+    write_markdown_output(
+        final_summary=final_summary,
+        verification_report=verification_report,
+        batch_summaries=batch_summaries,
+        chunk_summaries=chunk_summaries,
+        output_path=temp_output_path,
+        source_file=source_file,
+        model_name=model_name,
+    )
+
+    markdown = temp_output_path.read_text(encoding="utf-8")
+    temp_output_path.unlink(missing_ok=True)
+
+    return markdown
+
+
+def run_summarizer(pdf_path, model_path=None, progress_callback=None):
+    """
+    Main callable summarizer function for both CLI and GUI.
+
+    Takes:
+        pdf_path: path to PDF
+        model_path: optional model path override
+        progress_callback: optional function for GUI progress updates
+
+    Returns:
+        markdown string
+    """
+
+    setup_logging()
 
     start_time = time.time()
     errors = 0
     model_loaded = False
 
     pdf_path = Path(pdf_path)
-
-    if output_dir is None:
-        output_dir = Path("output")
-    else:
-        output_dir = Path(output_dir)
-
-    output_dir.mkdir(exist_ok=True)
 
     def progress(message):
         logging.info(message)
@@ -57,77 +92,87 @@ def run_summarizer(pdf_path, output_dir=None, progress_callback=None):
     try:
         progress(f"Starting summarization for: {pdf_path}")
 
-        # --- Extract text ---
         progress("Extracting PDF text...")
         pages = extract_pages(pdf_path)
         total_pages = len(pages)
         progress(f"Extracted {total_pages} pages.")
 
-        # --- Classify document ---
         progress("Classifying document type...")
-        document_type = classify_document(pages)
+        document_type = classify_document(total_pages)
         progress(f"Detected document type: {document_type}")
 
-        # --- Chunking ---
         progress("Chunking document...")
-        chunks = chunk_pages(pages, document_type=document_type)
+        chunks = chunk_pages(pages)
         total_chunks = len(chunks)
         progress(f"Created {total_chunks} chunks.")
 
-        # --- Load model ---
         progress("Loading model...")
-        model = load_model(MODEL_PATH)
+        load_model(model_path=model_path)
         model_loaded = True
 
         chunk_summaries = []
 
-        # --- Process chunks ---
         progress("Processing chunks...")
         for i, chunk in enumerate(chunks, start=1):
-            progress(f"Processing chunk {i}/{total_chunks}...")
+            progress(f"Processing chunk {i}/{total_chunks}: pages {chunk['start_page']}–{chunk['end_page']}")
 
             try:
-                if document_type == "article":
-                    summary = summarize_article(model, chunk)
-                else:
-                    summary = summarize_book(model, chunk)
+                summary = summarize_chunk(chunk)
+                compressed_notes = extract_compressed_notes(summary)
 
-                chunk_summaries.append(summary)
+                chunk_summaries.append({
+                    "chunk": chunk,
+                    "summary": summary,
+                    "compressed_notes": compressed_notes,
+                })
 
             except Exception as e:
                 errors += 1
-                logging.error(f"Error on chunk {i}: {e}")
-                chunk_summaries.append(f"[ERROR: Chunk {i} failed]")
+                logging.exception(f"Error on chunk {i}")
 
-        # --- Final summary ---
-        progress("Building final summary...")
-        final_summary = build_final_summary(model, chunk_summaries)
+                chunk_summaries.append({
+                    "chunk": chunk,
+                    "summary": f"[ERROR: Chunk {i} failed: {e}]",
+                    "compressed_notes": f"[ERROR: Chunk {i} failed: {e}]",
+                })
 
-        # --- Write output ---
-        progress("Writing output...")
-        output_path = write_markdown_output(
-            output_dir=output_dir,
-            input_filename=pdf_path.stem,
+        if document_type == "article":
+            progress("Synthesizing final article summary...")
+            final_summary = synthesize_article_summary(chunk_summaries)
+
+            progress("Verifying article summary...")
+            verification_report = verify_article_summary(final_summary, chunk_summaries)
+
+            batch_summaries = []
+
+        else:
+            progress("Synthesizing intermediate batch summaries...")
+            batch_summaries = synthesize_batches(chunk_summaries)
+
+            progress("Synthesizing final book summary...")
+            final_summary = synthesize_final_summary(batch_summaries)
+
+            progress("Verifying final book summary...")
+            verification_report = verify_final_summary(final_summary, batch_summaries)
+
+        progress("Building Markdown output...")
+
+        markdown = build_markdown(
             final_summary=final_summary,
-            chunk_summaries=chunk_summaries
+            verification_report=verification_report,
+            batch_summaries=batch_summaries,
+            chunk_summaries=chunk_summaries,
+            source_file=str(pdf_path),
+            model_name=model_path,
         )
 
         total_time = time.time() - start_time
 
         progress("Summarization complete.")
-        progress(f"Output saved to: {output_path}")
         progress(f"Total time: {total_time:.2f} seconds")
         progress(f"Errors: {errors}")
 
-        return {
-            "output_path": str(output_path),
-            "log_path": str(log_path),
-            "document_type": document_type,
-            "pages": total_pages,
-            "chunks": total_chunks,
-            "errors": errors,
-            "total_time": total_time,
-        }
+        return markdown
 
     finally:
         if model_loaded:
@@ -135,18 +180,28 @@ def run_summarizer(pdf_path, output_dir=None, progress_callback=None):
             unload_model()
 
 
-# --- CLI support (optional) ---
+def main():
+    import argparse
 
-def parse_args():
     parser = argparse.ArgumentParser(description="Summarize a PDF document.")
     parser.add_argument("pdf", help="Path to PDF file")
-    return parser.parse_args()
+    parser.add_argument("--output", "-o", help="Output Markdown file")
+    parser.add_argument("--model-path", help="Optional model path override")
 
+    args = parser.parse_args()
 
-def main():
-    args = parse_args()
-    result = run_summarizer(args.pdf)
-    print(f"\nSummary saved to: {result['output_path']}")
+    markdown = run_summarizer(
+        pdf_path=args.pdf,
+        model_path=args.model_path,
+    )
+
+    if args.output:
+        output_path = Path(args.output)
+    else:
+        output_path = Path(args.pdf).with_suffix(".summary.md")
+
+    output_path.write_text(markdown, encoding="utf-8")
+    print(f"Summary saved to: {output_path}")
 
 
 if __name__ == "__main__":

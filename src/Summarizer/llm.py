@@ -1,39 +1,50 @@
 import gc
+from pathlib import Path
 
 import mlx.core as mx
 from mlx_lm import load, generate
 
+from src.summarizer.config_loader import load_config
 
-from config_loader import load_config
-
-config = load_config()
-MODEL_PATH = config["model_path"]
 
 MAX_TOKENS = 2048
 
 _model = None
 _tokenizer = None
+_current_model_path = None
 
 
-def load_model():
-    global _model, _tokenizer
+def get_default_model_path():
+    config = load_config()
+    return config["model_path"]
 
-    if _model is None or _tokenizer is None:
-        print("Loading model...")
-        _model, _tokenizer = load(MODEL_PATH)
+
+def load_model(model_path=None):
+    global _model, _tokenizer, _current_model_path
+
+    if model_path is None:
+        model_path = get_default_model_path()
+
+    model_path = str(Path(model_path).expanduser())
+
+    if _model is None or _tokenizer is None or _current_model_path != model_path:
+        print(f"Loading model: {model_path}")
+        _model, _tokenizer = load(model_path)
+        _current_model_path = model_path
         print("Model loaded.")
 
     return _model, _tokenizer
 
 
 def unload_model():
-    global _model, _tokenizer
+    global _model, _tokenizer, _current_model_path
 
     if _model is not None or _tokenizer is not None:
         print("Unloading model...")
 
     _model = None
     _tokenizer = None
+    _current_model_path = None
 
     gc.collect()
     mx.clear_cache()

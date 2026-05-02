@@ -24,13 +24,15 @@ from PyQt6.QtWidgets import (
 # Replace these with imports from your real project modules.
 # ------------------------------------------------------------
 
-def summarize_pdf(pdf_path: Path, model_path: str, progress_callback):
-    progress_callback("Starting summarization...")
-    progress_callback(f"PDF: {pdf_path}")
-    progress_callback(f"Model path/server: {model_path}")
+from src.summarizer.summarizer_core import run_summarizer
 
-    # TODO: Replace this with your actual summarization pipeline.
-    return f"# Summary\n\nSummarized PDF: `{pdf_path.name}`\n"
+
+def summarize_pdf(pdf_path: Path, model_path: str, progress_callback):
+    return run_summarizer(
+        pdf_path=pdf_path,
+        model_path=model_path,
+        progress_callback=progress_callback,
+    )
 
 
 def ocr_pdf(pdf_path: Path, model_path: str, progress_callback):

@@ -1,6 +1,6 @@
-from llm import generate_text
+from src.summarizer.llm import generate_text
 
-from prompts import (
+from src.summarizer.prompts import (
     batch_synthesis_prompt,
     chunk_summary_prompt,
     final_summary_prompt,
