@@ -18,37 +18,11 @@ from PyQt6.QtWidgets import (
     QGroupBox,
 )
 
-from src.summarizer.summarizer_core import run_summarizer
-
-
-# ------------------------------------------------------------
-# Backend functions
-# ------------------------------------------------------------
-
-def summarize_pdf(pdf_path: Path, model_path: str, progress_callback):
-    return run_summarizer(
-        pdf_path=pdf_path,
-        model_path=model_path,
-        progress_callback=progress_callback,
-    )
-
-
-def ocr_pdf(pdf_path: Path, model_path: str, progress_callback):
-    progress_callback("Starting OCR...")
-    progress_callback(f"PDF: {pdf_path}")
-    progress_callback(f"Model path/server: {model_path}")
-
-    # TODO: Replace this with your real OCR pipeline.
-    return f"# OCR Output\n\nOCR text from PDF: `{pdf_path.name}`\n"
-
-
-def translate_pdf(pdf_path: Path, model_path: str, progress_callback):
-    progress_callback("Starting translation...")
-    progress_callback(f"PDF: {pdf_path}")
-    progress_callback(f"Model path/server: {model_path}")
-
-    # TODO: Replace this with your real translation pipeline.
-    return f"# Translation\n\nTranslated PDF: `{pdf_path.name}`\n"
+from src.summarizer.summarizer_core import analytical_summarize_pdf
+from src.summarizer.summarizer_core import simple_summarize_pdf
+from src.ner.entity_core import named_entity_recognition_pdf
+#from src.ocr.ocr_core import ocr_pdf
+#from src.translation.translation_core import translate_pdf
 
 
 # ------------------------------------------------------------
@@ -122,8 +96,20 @@ class Worker(QThread):
 
     def run(self):
         try:
-            if self.task_name == "summarize":
-                markdown = summarize_pdf(
+            if self.task_name == "analytical_summarize":
+                markdown = analytical_summarize_pdf(
+                    self.pdf_path,
+                    self.model_path,
+                    self.progress.emit,
+                )
+            elif self.task_name == "simple_summarize":
+                markdown = simple_summarize_pdf(
+                    self.pdf_path,
+                    self.model_path,
+                    self.progress.emit,
+                )
+            elif self.task_name == "ner":
+                markdown = named_entity_recognition_pdf(
                     self.pdf_path,
                     self.model_path,
                     self.progress.emit,
@@ -214,12 +200,16 @@ class HistorianToolkitGUI(QWidget):
 
         self.selected_pdf_label = QLabel("No PDF selected")
 
-        self.summarize_button = QPushButton("Summarize")
+        self.analytical_summarize_button = QPushButton("Analytical Summarizer")
+        self.simple_summarize_button = QPushButton("Simple Summarize")
+        self.ner_button = QPushButton("Named Entity Recognition")
         self.ocr_button = QPushButton("OCR")
         self.translate_button = QPushButton("Translate")
         self.settings_button = QPushButton("Settings")
 
-        self.summarize_button.clicked.connect(lambda: self.start_task("summarize"))
+        self.analytical_summarize_button.clicked.connect(lambda: self.start_task("analytical_summarize"))
+        self.simple_summarize_button.clicked.connect(lambda: self.start_task("simple_summarize"))
+        self.ner_button.clicked.connect(lambda: self.start_task("ner"))
         self.ocr_button.clicked.connect(lambda: self.start_task("ocr"))
         self.translate_button.clicked.connect(lambda: self.start_task("translate"))
         self.settings_button.clicked.connect(self.open_settings)
@@ -236,7 +226,9 @@ class HistorianToolkitGUI(QWidget):
         main_layout.addWidget(self.selected_pdf_label)
 
         button_layout = QHBoxLayout()
-        button_layout.addWidget(self.summarize_button)
+        button_layout.addWidget(self.analytical_summarize_button)
+        button_layout.addWidget(self.simple_summarize_button)
+        button_layout.addWidget(self.ner_button)
         button_layout.addWidget(self.ocr_button)
         button_layout.addWidget(self.translate_button)
         button_layout.addWidget(self.settings_button)
@@ -282,8 +274,12 @@ class HistorianToolkitGUI(QWidget):
 
         suggested_name = self.pdf_path.with_suffix("").name
 
-        if task_name == "summarize":
-            suggested_name += "_summary.md"
+        if task_name == "analytical_summarize":
+            suggested_name += "_analytical_summary.md"
+        elif task_name == "simple_summarize":
+            suggested_name += "_simple_summary.md"
+        elif task_name == "ner":
+            suggested_name += "_entities.md"
         elif task_name == "ocr":
             suggested_name += "_ocr.md"
         elif task_name == "translate":
@@ -334,7 +330,9 @@ class HistorianToolkitGUI(QWidget):
         self.set_buttons_enabled(True)
 
     def set_buttons_enabled(self, enabled: bool):
-        self.summarize_button.setEnabled(enabled)
+        self.analytical_summarize_button.setEnabled(enabled)
+        self.simple_summarize_button.setEnabled(enabled)
+        self.ner_button.setEnabled(enabled)
         self.ocr_button.setEnabled(enabled)
         self.translate_button.setEnabled(enabled)
         self.settings_button.setEnabled(enabled)

@@ -1,25 +1,18 @@
 import gc
 from pathlib import Path
-from urllib.parse import urljoin
 
 import requests
 import mlx.core as mx
 from mlx_lm import load, generate
 
-from src.summarizer.config_loader import load_config
-
 
 MAX_TOKENS = 8192
+DEFAULT_SYSTEM_PROMPT = "Do not show your reasoning. Return only the final answer."
 
 _model = None
 _tokenizer = None
 _current_model_path = None
 _server_url = None
-
-
-def get_default_model_path():
-    config = load_config()
-    return config["model_path"]
 
 
 def is_server_url(value: str) -> bool:
@@ -38,15 +31,15 @@ def normalize_lm_studio_url(url: str) -> str:
     return url.rstrip("/") + "/v1/chat/completions"
 
 
-def load_model(model_path=None):
+def load_model(model_path: str):
     """
     For local MLX models, load the model.
-    For LM Studio server URLs, just store the server URL.
+    For LM Studio server URLs, store the server URL.
     """
     global _model, _tokenizer, _current_model_path, _server_url
 
-    if model_path is None:
-        model_path = get_default_model_path()
+    if not model_path:
+        raise ValueError("No model path or LM Studio server URL was provided.")
 
     model_path = str(model_path).strip()
 
@@ -91,16 +84,39 @@ def unload_model():
     print("Model unloaded.")
 
 
-def generate_text(prompt: str, max_tokens: int = MAX_TOKENS) -> str:
-    if _server_url:
-        return generate_text_lm_studio(prompt, max_tokens=max_tokens)
+def generate_text(
+    prompt: str,
+    system_prompt: str = DEFAULT_SYSTEM_PROMPT,
+    max_tokens: int = MAX_TOKENS,
+    temperature: float = 0.2,
+) -> str:
+    """
+    Generate text using either:
+    - LM Studio server, if load_model() was given a server URL
+    - local MLX model, if load_model() was given a local model path
 
-    model, tokenizer = load_model()
+    The model must be initialized first with load_model(model_path_or_url).
+    """
+
+    if _server_url:
+        return generate_text_lm_studio(
+            prompt=prompt,
+            system_prompt=system_prompt,
+            max_tokens=max_tokens,
+            temperature=temperature,
+        )
+
+    if _model is None or _tokenizer is None:
+        raise RuntimeError(
+            "No local model is loaded. Call load_model(model_path_or_url) before generate_text()."
+        )
+
+    full_prompt = f"{system_prompt}\n\n{prompt}"
 
     response = generate(
-        model,
-        tokenizer,
-        prompt=prompt,
+        _model,
+        _tokenizer,
+        prompt=full_prompt,
         max_tokens=max_tokens,
         verbose=False,
     )
@@ -115,7 +131,12 @@ def generate_text(prompt: str, max_tokens: int = MAX_TOKENS) -> str:
     return text.strip()
 
 
-def generate_text_lm_studio(prompt: str, max_tokens: int = MAX_TOKENS) -> str:
+def generate_text_lm_studio(
+    prompt: str,
+    system_prompt: str = DEFAULT_SYSTEM_PROMPT,
+    max_tokens: int = MAX_TOKENS,
+    temperature: float = 0.2,
+) -> str:
     if not _server_url:
         raise RuntimeError("LM Studio server URL is not configured.")
 
@@ -124,14 +145,14 @@ def generate_text_lm_studio(prompt: str, max_tokens: int = MAX_TOKENS) -> str:
         "messages": [
             {
                 "role": "system",
-                "content": "Do not show your reasoning. Return only the final answer."
+                "content": system_prompt,
             },
             {
                 "role": "user",
                 "content": prompt,
-            }
+            },
         ],
-        "temperature": 0.2,
+        "temperature": temperature,
         "max_tokens": max_tokens,
     }
 

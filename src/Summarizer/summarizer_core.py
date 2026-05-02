@@ -5,7 +5,7 @@ from pathlib import Path
 from src.summarizer.extractor import extract_pages
 from src.summarizer.chunker import chunk_pages
 from src.summarizer.classifier import classify_document
-from src.summarizer.llm import load_model, unload_model
+from src.llm.llm import load_model, unload_model
 from src.summarizer.summarizer import (
     summarize_chunk,
     extract_compressed_notes,
@@ -16,6 +16,22 @@ from src.summarizer.summarizer import (
     verify_article_summary,
 )
 from src.summarizer.writer import write_markdown_output
+
+
+def analytical_summarize_pdf(pdf_path: Path, model_path: str, progress_callback):
+    return run_summarizer(
+        pdf_path=pdf_path,
+        model_path=model_path,
+        progress_callback=progress_callback,
+    )
+
+
+def simple_summarize_pdf(pdf_path: Path, model_path: str, progress_callback):
+    progress_callback("Starting simple summarize...")
+    progress_callback(f"PDF: {pdf_path}")
+    progress_callback(f"Model path/server: {model_path}")
+
+    return f"# Simple Summary\n\nSimple narrative summary placeholder for PDF: `{pdf_path.name}`\n"
 
 
 def setup_logging():

@@ -1,4 +1,4 @@
-from src.summarizer.llm import generate_text
+from src.llm.llm import generate_text
 
 from src.summarizer.prompts import (
     batch_synthesis_prompt,
