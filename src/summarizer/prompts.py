@@ -441,3 +441,163 @@ Final article summary:
 Chunk summaries:
 {combined}
 """
+
+
+def simple_chunk_summary_prompt(chunk):
+    return f"""
+You are creating a simple narrative history summary from pages {chunk['start_page']}–{chunk['end_page']}.
+
+Your task is to summarize what happens in this chunk: events, people, institutions, decisions, causes, consequences, chronology, and changes over time.
+
+This is NOT an analytical research-note mode. Do not focus on historiography, scholarly intervention, argument mechanics, or methodological critique unless the text itself makes them necessary for understanding the narrative.
+
+STRICT REQUIREMENTS:
+- Do NOT add outside knowledge.
+- Do NOT infer events or causes not supported by this chunk.
+- Preserve chronology when possible.
+- Include page references for major events, people, institutions, claims, and turning points.
+- Use plain, direct language.
+- If the chunk is mostly conceptual rather than narrative, summarize the concepts only as much as needed to understand the historical story being told.
+- If something is unclear, write "unclear from this chunk."
+- If a requested category is not present, write "Not stated in this chunk."
+
+Output exactly the following sections:
+
+## What Happens in This Chunk
+Maximum 200 words.
+Summarize the historical narrative in this chunk in chronological order where possible.
+
+## Main People, Groups, and Institutions
+List the important people, groups, states, agencies, organizations, or institutions in this chunk.
+For each one, state what they do or why they matter. Include page references.
+
+## Key Events and Developments
+List the major events, decisions, policies, conflicts, changes, or turning points. Include page references.
+
+## Causes and Consequences
+List clear cause-and-effect relationships stated or strongly supported by the chunk. Include page references.
+
+## Important Terms
+List important terms, categories, places, laws, policies, or concepts needed to follow the narrative. Include brief definitions and page references.
+
+## Narrative Notes
+Maximum 200 words.
+Provide compact notes preserving the sequence of events, main actors, causes, consequences, and page references.
+
+Text:
+{chunk['text']}
+"""
+
+
+def simple_final_summary_prompt(combined):
+    return f"""
+Based on the following chunk narrative notes, produce a simple narrative summary of the text.
+
+This summary is meant to help a reader understand the history being told: what happened, who mattered, how events unfolded, what changed, and why it mattered within the text.
+
+This is NOT a historian-oriented analytical summary. Do not foreground historiography, scholarly intervention, theoretical framing, or critique unless they are necessary to understand the narrative.
+
+STRICT REQUIREMENTS:
+- Do NOT add outside knowledge.
+- Do NOT infer events, causes, or consequences not supported by the notes.
+- Preserve chronology wherever possible.
+- Include page references for major events, people, institutions, developments, and turning points.
+- Do not make the narrative cleaner or more complete than the notes support.
+- Use plain, direct language.
+- If something is unclear, write "unclear from the notes."
+- If a requested category is not present, write "Not stated in the notes."
+
+Output exactly the following sections:
+
+## Overview
+Maximum 250 words.
+Give a clear overview of the history narrated in the text.
+
+## Chronological Narrative
+Provide a fuller summary of the events, developments, and changes described, in the order they unfold.
+Use page references throughout.
+
+## Main People, Groups, and Institutions
+List the important actors in the text.
+For each one, explain what they do in the narrative and why they matter. Include page references.
+
+## Key Events and Developments
+List the most important events, decisions, policies, conflicts, changes, and turning points. Include page references.
+
+## Causes and Consequences
+List the major cause-and-effect relationships in the text. Include page references.
+
+## Important Terms and Places
+List important terms, categories, laws, policies, places, or concepts needed to understand the narrative. Include brief explanations and page references.
+
+## What to Remember
+Maximum 150 words.
+State the most important takeaway from the historical narrative.
+
+Chunk narrative notes:
+{combined}
+"""
+
+
+def simple_verification_prompt(final_summary, combined):
+    return f"""
+Evaluate the simple narrative summary against the chunk narrative notes.
+
+Your task is not to rewrite the summary. Your task is to identify reliability problems.
+
+STRICT REQUIREMENTS:
+- Be conservative.
+- Do NOT add outside knowledge.
+- Do NOT suggest additions unless they are supported by the notes.
+- Focus on hallucinated events, unsupported causality, wrong chronology, missing major actors, missing major events, missing page references, and vague summary language.
+
+Check for:
+- Events not supported by the notes
+- People, groups, or institutions not supported by the notes
+- Causes or consequences not supported by the notes
+- Chronology that is wrong or too neat
+- Missing major events or turning points
+- Missing page references
+- Claims that need hedging
+- Places where uncertainty should be preserved
+
+Output exactly the following sections:
+
+## Unsupported or Overstated Narrative Claims
+For each issue:
+- Problem:
+- Why it is a problem:
+- Suggested correction:
+
+## Chronology Problems
+For each issue:
+- Problem:
+- Why it is a problem:
+- Suggested correction:
+
+## Missing Major Actors or Events
+For each issue:
+- Problem:
+- Why it matters:
+- Suggested correction:
+
+## Unsupported Causality
+For each issue:
+- Problem:
+- Why it is a problem:
+- Suggested correction:
+
+## Missing Page References
+List claims that need page references.
+
+## Overall Reliability Assessment
+Choose one: Reliable / Mostly reliable / Needs revision / Unreliable.
+Briefly explain why.
+
+Simple narrative summary:
+{final_summary}
+
+Chunk narrative notes:
+{combined}
+"""
+

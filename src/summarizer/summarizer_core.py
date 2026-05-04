@@ -14,8 +14,15 @@ from src.summarizer.summarizer import (
     verify_final_summary,
     synthesize_article_summary,
     verify_article_summary,
+    summarize_simple_chunk,
+    extract_simple_narrative_notes,
+    synthesize_simple_summary,
+    verify_simple_summary,
 )
 from src.summarizer.writer import write_markdown_output
+
+
+VALID_SUMMARY_MODES = {"analytical", "simple"}
 
 
 def analytical_summarize_pdf(pdf_path: Path, model_path: str, progress_callback):
@@ -23,15 +30,17 @@ def analytical_summarize_pdf(pdf_path: Path, model_path: str, progress_callback)
         pdf_path=pdf_path,
         model_path=model_path,
         progress_callback=progress_callback,
+        summary_mode="analytical",
     )
 
 
 def simple_summarize_pdf(pdf_path: Path, model_path: str, progress_callback):
-    progress_callback("Starting simple summarize...")
-    progress_callback(f"PDF: {pdf_path}")
-    progress_callback(f"Model path/server: {model_path}")
-
-    return f"# Simple Summary\n\nSimple narrative summary placeholder for PDF: `{pdf_path.name}`\n"
+    return run_summarizer(
+        pdf_path=pdf_path,
+        model_path=model_path,
+        progress_callback=progress_callback,
+        summary_mode="simple",
+    )
 
 
 def setup_logging():
@@ -60,6 +69,7 @@ def build_markdown(
     chunk_summaries,
     source_file,
     model_name=None,
+    summary_mode="analytical",
 ):
     temp_output_path = Path("__temp_summary_output.md")
 
@@ -71,6 +81,7 @@ def build_markdown(
         output_path=temp_output_path,
         source_file=source_file,
         model_name=model_name,
+        summary_mode=summary_mode,
     )
 
     markdown = temp_output_path.read_text(encoding="utf-8")
@@ -79,7 +90,7 @@ def build_markdown(
     return markdown
 
 
-def run_summarizer(pdf_path, model_path=None, progress_callback=None):
+def run_summarizer(pdf_path, model_path=None, progress_callback=None, summary_mode="analytical"):
     """
     Main callable summarizer function for both CLI and GUI.
 
@@ -87,12 +98,19 @@ def run_summarizer(pdf_path, model_path=None, progress_callback=None):
         pdf_path: path to PDF
         model_path: optional model path override
         progress_callback: optional function for GUI progress updates
+        summary_mode: "analytical" or "simple"
 
     Returns:
         markdown string
     """
 
     setup_logging()
+
+    if summary_mode not in VALID_SUMMARY_MODES:
+        raise ValueError(
+            f"Invalid summary_mode: {summary_mode}. "
+            f"Expected one of: {', '.join(sorted(VALID_SUMMARY_MODES))}"
+        )
 
     start_time = time.time()
     errors = 0
@@ -106,7 +124,7 @@ def run_summarizer(pdf_path, model_path=None, progress_callback=None):
             progress_callback(message)
 
     try:
-        progress(f"Starting summarization for: {pdf_path}")
+        progress(f"Starting {summary_mode} summarization for: {pdf_path}")
 
         progress("Extracting PDF text...")
         pages = extract_pages(pdf_path)
@@ -133,8 +151,12 @@ def run_summarizer(pdf_path, model_path=None, progress_callback=None):
             progress(f"Processing chunk {i}/{total_chunks}: pages {chunk['start_page']}–{chunk['end_page']}")
 
             try:
-                summary = summarize_chunk(chunk)
-                compressed_notes = extract_compressed_notes(summary)
+                if summary_mode == "simple":
+                    summary = summarize_simple_chunk(chunk)
+                    compressed_notes = extract_simple_narrative_notes(summary)
+                else:
+                    summary = summarize_chunk(chunk)
+                    compressed_notes = extract_compressed_notes(summary)
 
                 chunk_summaries.append({
                     "chunk": chunk,
@@ -152,7 +174,16 @@ def run_summarizer(pdf_path, model_path=None, progress_callback=None):
                     "compressed_notes": f"[ERROR: Chunk {i} failed: {e}]",
                 })
 
-        if document_type == "article":
+        if summary_mode == "simple":
+            progress("Synthesizing simple narrative summary...")
+            final_summary = synthesize_simple_summary(chunk_summaries)
+
+            progress("Verifying simple narrative summary...")
+            verification_report = verify_simple_summary(final_summary, chunk_summaries)
+
+            batch_summaries = []
+
+        elif document_type == "article":
             progress("Synthesizing final article summary...")
             final_summary = synthesize_article_summary(chunk_summaries)
 
@@ -180,6 +211,7 @@ def run_summarizer(pdf_path, model_path=None, progress_callback=None):
             chunk_summaries=chunk_summaries,
             source_file=str(pdf_path),
             model_name=model_path,
+            summary_mode=summary_mode,
         )
 
         total_time = time.time() - start_time
@@ -203,18 +235,26 @@ def main():
     parser.add_argument("pdf", help="Path to PDF file")
     parser.add_argument("--output", "-o", help="Output Markdown file")
     parser.add_argument("--model-path", help="Optional model path override")
+    parser.add_argument(
+        "--mode",
+        choices=sorted(VALID_SUMMARY_MODES),
+        default="analytical",
+        help="Summary mode: analytical or simple",
+    )
 
     args = parser.parse_args()
 
     markdown = run_summarizer(
         pdf_path=args.pdf,
         model_path=args.model_path,
+        summary_mode=args.mode,
     )
 
     if args.output:
         output_path = Path(args.output)
     else:
-        output_path = Path(args.pdf).with_suffix(".summary.md")
+        suffix = ".simple-summary.md" if args.mode == "simple" else ".summary.md"
+        output_path = Path(args.pdf).with_suffix(suffix)
 
     output_path.write_text(markdown, encoding="utf-8")
     print(f"Summary saved to: {output_path}")

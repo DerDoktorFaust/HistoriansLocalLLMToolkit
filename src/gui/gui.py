@@ -201,7 +201,7 @@ class HistorianToolkitGUI(QWidget):
         self.selected_pdf_label = QLabel("No PDF selected")
 
         self.analytical_summarize_button = QPushButton("Analytical Summarizer")
-        self.simple_summarize_button = QPushButton("Simple Summarize")
+        self.simple_summarize_button = QPushButton("Simple Narrative Summarizer")
         self.ner_button = QPushButton("Named Entity Recognition")
         self.ocr_button = QPushButton("OCR")
         self.translate_button = QPushButton("Translate")

@@ -6,7 +6,10 @@ from src.summarizer.prompts import (
     final_summary_prompt,
     verification_prompt,
     article_final_summary_prompt,
-    article_verification_prompt
+    article_verification_prompt,
+    simple_chunk_summary_prompt,
+    simple_final_summary_prompt,
+    simple_verification_prompt,
 )
 
 
@@ -67,6 +70,7 @@ def verify_final_summary(final_summary, batch_summaries):
     prompt = verification_prompt(final_summary, combined)
     return generate_text(prompt)
 
+
 def synthesize_article_summary(chunk_summaries):
     combined = "\n\n".join(
         f"Pages {s['chunk']['start_page']}–{s['chunk']['end_page']}:\n"
@@ -86,4 +90,42 @@ def verify_article_summary(final_summary, chunk_summaries):
     )
 
     prompt = article_verification_prompt(final_summary, combined)
+    return generate_text(prompt)
+
+
+# --- SIMPLE NARRATIVE SUMMARIZER ---
+
+def summarize_simple_chunk(chunk):
+    prompt = simple_chunk_summary_prompt(chunk)
+    return generate_text(prompt)
+
+
+def extract_simple_narrative_notes(summary):
+    marker = "## Narrative Notes"
+
+    if marker in summary:
+        return summary.split(marker, 1)[1].strip()
+
+    return summary[:1200].strip()
+
+
+def synthesize_simple_summary(chunk_summaries):
+    combined = "\n\n".join(
+        f"Pages {s['chunk']['start_page']}–{s['chunk']['end_page']}:\n"
+        f"{s['compressed_notes']}"
+        for s in chunk_summaries
+    )
+
+    prompt = simple_final_summary_prompt(combined)
+    return generate_text(prompt)
+
+
+def verify_simple_summary(final_summary, chunk_summaries):
+    combined = "\n\n".join(
+        f"Pages {s['chunk']['start_page']}–{s['chunk']['end_page']}:\n"
+        f"{s['compressed_notes']}"
+        for s in chunk_summaries
+    )
+
+    prompt = simple_verification_prompt(final_summary, combined)
     return generate_text(prompt)

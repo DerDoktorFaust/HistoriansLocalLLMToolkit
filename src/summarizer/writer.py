@@ -15,6 +15,7 @@ def write_markdown_output(
     output_path,
     source_file=None,
     model_name=None,
+    summary_mode="analytical",
 ):
     now = datetime.now().isoformat()
 
@@ -30,6 +31,7 @@ def write_markdown_output(
 
     lines.append(f"source_file: {source_file if source_file else 'null'}")
     lines.append(f"model: {model_name if model_name else 'null'}")
+    lines.append(f"summary_mode: {summary_mode}")
 
     lines.append("model_provider: null")
     lines.append(f"generated_at: {now}")
@@ -37,7 +39,10 @@ def write_markdown_output(
     lines.append("---\n")
 
     # --- TITLE PLACEHOLDER ---
-    lines.append("# Document Summary\n")
+    if summary_mode == "simple":
+        lines.append("# Simple Narrative Summary\n")
+    else:
+        lines.append("# Document Summary\n")
 
     # --- TRACEABILITY NOTE ---
     lines.append("## Page Traceability\n")
@@ -58,15 +63,16 @@ def write_markdown_output(
     lines.append("\n---\n")
 
     # --- BATCH SUMMARIES ---
-    lines.append("## Intermediate Batch Summaries\n")
+    if batch_summaries:
+        lines.append("## Intermediate Batch Summaries\n")
 
-    for i, batch in enumerate(batch_summaries, start=1):
-        page_range = format_page_range(batch["start_page"], batch["end_page"])
+        for i, batch in enumerate(batch_summaries, start=1):
+            page_range = format_page_range(batch["start_page"], batch["end_page"])
 
-        lines.append(f"### Batch {i}: {page_range}\n")
-        lines.append(f"**Pages covered:** {batch['start_page']}–{batch['end_page']}\n")
-        lines.append(batch["summary"].strip())
-        lines.append("\n---\n")
+            lines.append(f"### Batch {i}: {page_range}\n")
+            lines.append(f"**Pages covered:** {batch['start_page']}–{batch['end_page']}\n")
+            lines.append(batch["summary"].strip())
+            lines.append("\n---\n")
 
     # --- CHUNK SUMMARIES ---
     lines.append("## Chunk Summaries\n")
