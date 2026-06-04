@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -56,6 +57,7 @@ def run_ocr(
     preprocess_mode: str = "basic",
     dpi: int = 300,
     save_txt: bool = True,
+    save_page_images: bool = False,
     progress_callback: Optional[Callable[[str], None]] = None,
 ) -> OCRDocumentResult:
     report_progress(progress_callback, "Preparing OCR job...")
@@ -72,6 +74,7 @@ def run_ocr(
     report_progress(progress_callback, f"Input file: {input_path.name}")
     report_progress(progress_callback, f"OCR mode: {mode.value}")
     report_progress(progress_callback, f"Preprocessing mode: {preprocess_mode}")
+    report_progress(progress_callback, f"Save page images: {save_page_images}")
 
     if input_path.suffix.lower() == ".pdf":
         if mode == OCRMode.EXTRACT_TEXT:
@@ -90,6 +93,7 @@ def run_ocr(
                 server_url=server_url,
                 preprocess_mode=preprocess_mode,
                 dpi=dpi,
+                save_page_images=save_page_images,
                 progress_callback=progress_callback,
             )
     else:
@@ -164,6 +168,7 @@ def ocr_pdf_pages(
     server_url: Optional[str] = None,
     preprocess_mode: str = "basic",
     dpi: int = 300,
+    save_page_images: bool = False,
     progress_callback: Optional[Callable[[str], None]] = None,
 ) -> OCRDocumentResult:
     page_image_dir = output_dir / f"{input_path.stem}_page_images"
@@ -212,6 +217,15 @@ def ocr_pdf_pages(
                 )
 
             pages.append(result)
+
+    if not save_page_images:
+        report_progress(progress_callback, "Removing temporary page images...")
+        shutil.rmtree(page_image_dir, ignore_errors=True)
+    else:
+        report_progress(
+            progress_callback,
+            f"Saved rendered page images to: {page_image_dir}",
+        )
 
     return OCRDocumentResult(
         input_path=input_path,

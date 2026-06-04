@@ -17,6 +17,7 @@ from PyQt6.QtWidgets import (
     QDialogButtonBox,
     QGroupBox,
     QComboBox,
+    QCheckBox,
 )
 
 from src.summarizer.summarizer_core import analytical_summarize_pdf
@@ -100,10 +101,14 @@ class OCROptionsDialog(QDialog):
         self.preprocess_combo.addItem("Basic - recommended", "basic")
         self.preprocess_combo.addItem("Archival - aggressive", "archival")
         self.preprocess_combo.setCurrentIndex(1)
+        
+        self.save_images_checkbox = QCheckBox("Save rendered page images")
+        self.save_images_checkbox.setChecked(False)
 
         form_layout = QFormLayout()
         form_layout.addRow("OCR method:", self.ocr_mode_combo)
         form_layout.addRow("Image preprocessing:", self.preprocess_combo)
+        form_layout.addRow("", self.save_images_checkbox)
 
         self.buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok
@@ -124,6 +129,9 @@ class OCROptionsDialog(QDialog):
 
     def selected_preprocess_mode(self) -> str:
         return self.preprocess_combo.currentData()
+    
+    def should_save_page_images(self) -> bool:
+        return self.save_images_checkbox.isChecked()
 
 # ------------------------------------------------------------
 # Worker Thread
@@ -134,7 +142,7 @@ class Worker(QThread):
     finished = pyqtSignal(str)
     failed = pyqtSignal(str)
 
-    def __init__(self, task_name: str, pdf_path: Path, save_path: Path, model_path: str, ocr_mode=None, preprocess_mode=None):
+    def __init__(self, task_name: str, pdf_path: Path, save_path: Path, model_path: str, ocr_mode=None, preprocess_mode=None, save_page_images: bool = False):
         super().__init__()
         self.task_name = task_name
         self.pdf_path = pdf_path
@@ -142,6 +150,7 @@ class Worker(QThread):
         self.model_path = model_path
         self.ocr_mode = ocr_mode
         self.preprocess_mode = preprocess_mode
+        self.save_page_images = save_page_images
         
 
     def run(self):
@@ -172,6 +181,7 @@ class Worker(QThread):
                     model_path=self.model_path,
                     preprocess_mode=self.preprocess_mode or "basic",
                     save_txt=False,
+                    save_page_images=self.save_page_images,
                     progress_callback=self.progress.emit,
                 )
                 markdown = result.full_text
@@ -410,6 +420,7 @@ class HistorianToolkitGUI(QWidget):
 
         ocr_mode = dialog.selected_ocr_mode()
         preprocess_mode = dialog.selected_preprocess_mode()
+        save_page_images = dialog.should_save_page_images()
 
         model_path = self.settings.value("model_path", "").strip()
 
@@ -444,6 +455,7 @@ class HistorianToolkitGUI(QWidget):
         self.log("Starting OCR")
         self.log(f"OCR method: {ocr_mode}")
         self.log(f"Image preprocessing: {preprocess_mode}")
+        self.log(f"Save rendered page images: {save_page_images}")
         self.log(f"Output will be saved to: {save_path}")
 
         self.worker = Worker(
@@ -453,6 +465,7 @@ class HistorianToolkitGUI(QWidget):
             model_path=model_path,
             ocr_mode=ocr_mode,
             preprocess_mode=preprocess_mode,
+            save_page_images=save_page_images,
         )
 
         self.worker.progress.connect(self.log)
