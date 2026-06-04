@@ -1,50 +1,222 @@
-# Local LLM Toolkit for Historical Text Analysis
+# Historians Local LLM Toolkit
 
-## Overview
-This project is a local large language model (LLM) toolkit designed for historians to process and analyze textual sources without reliance on external APIs. It provides an integrated workflow for summarizing books and articles, performing OCR on scanned PDFs, and translating historical texts, all within a local environment.
+A local-first desktop application for historians, archivists, genealogists, and digital humanists who work with scanned documents, multilingual sources, and large collections of PDFs.
 
-## Core Features
-- **Summarization**  
-  Automatically generates structured summaries of books and articles, preserving argumentation, key themes, and page-level references.
+The Historians Local LLM Toolkit combines OCR, translation, and AI-assisted document analysis into a single workflow powered entirely by locally hosted models. No cloud APIs are required, allowing researchers to maintain full control over sensitive archival materials and research data.
 
-- **OCR (Optical Character Recognition)**  
-  Extracts text from scanned or image-based PDFs using local vision-language models, with an emphasis on accurate transcription of historical documents.
+**Version 1.0**
 
-- **Translation**  
-  Translates texts (e.g., German to English) while maintaining historical terminology and structure.
+---
 
-## Technical Implementation
-- Written in **Python**
-- Uses **local LLMs** (via MLX or LM Studio)
-- Modular architecture:
-  - `main.py` – entry point
-  - `extractor.py` – PDF handling
-  - `chunker.py` – text segmentation
-  - `llm.py` – model interaction
-  - `summarizer.py` – prompt logic and summarization
-  - `writer.py` – structured output generation
-- Outputs results as structured **Markdown files**
+## Why This Project Exists
 
-## Usage
-Run from the terminal:
+Historical research increasingly depends on large collections of digitized materials. Researchers often spend substantial time extracting text from scanned documents, translating foreign-language sources, organizing outputs, and preparing materials for analysis.
 
-```bash
-python3 main.py path/to/document.pdf
+This toolkit was built to reduce that overhead.
+
+Instead of relying on multiple disconnected tools and cloud services, the Historians Local LLM Toolkit provides a unified environment for:
+
+- OCR of scanned documents
+- Translation of historical texts
+- AI-assisted analysis and summarization
+- Batch processing of research collections
+
+All processing occurs locally using models hosted through LM Studio.
+
+---
+
+## Key Features
+
+### Desktop Application
+
+- Drag-and-drop PDF loading
+- Multi-document processing
+- Batch workflows
+- File management interface
+- Processing queue
+- One-click document processing
+- Configurable settings panel
+
+### Optical Character Recognition (OCR)
+
+#### Tesseract OCR
+
+- Fast local OCR engine
+- Multi-language support
+- User-selectable language packs
+- Suitable for large collections
+
+#### Vision-Language Model OCR
+
+- Uses multimodal AI models through LM Studio
+- Better performance on difficult scans
+- Improved handling of historical documents
+- Better interpretation of complex layouts
+
+### Translation
+
+- Automatic source-language detection
+- User-selectable target language
+- Batch translation of multiple PDFs
+- Preservation of document structure
+- Local processing through LM Studio
+
+### AI-Assisted Summarization
+
+- Books
+- Journal articles
+- Archival documents
+- Research reports
+- Historical sources
+
+Outputs are generated in Markdown format and integrate easily with Obsidian, DEVONthink, and Zotero workflows.
+
+### Local LLM Integration
+
+- No API costs
+- Complete privacy
+- Offline capability
+- Full model control
+- Support for archival and sensitive materials
+
+Current support:
+
+- LM Studio
+
+---
+
+## Research Workflow
+
+1. Add one or more PDFs.
+2. Select desired operations:
+   - OCR
+   - Translation
+   - Summarization
+3. Click **Process Document(s)**.
+4. Outputs are generated automatically.
+
+The toolkit automatically performs prerequisite steps when required.
+
+---
+
+## File Management
+
+- Drag-and-drop file loading
+- Add files through a file browser
+- Multi-file selection
+- Remove selected files
+- Clear all files from the queue
+
+---
+
+## Output Formats
+
+### OCR Output
+
+```text
+document_ocr.txt
 ```
 
-The script will:
+### Translation Output
 
-1. Determine document type (article or book)
-2. Extract or OCR text as needed
-3. Process the text with a local model
-4. Output a structured Markdown summary
+```text
+document_en.txt
+document_fr.txt
+document_de.txt
+```
 
-Requirements
+### Summary Output
 
-* Python 3.10+
-* Local LLM setup (MLX or LM Studio)
-* Required Python packages (see requirements.txt)
+```text
+document_summary.md
+```
 
-Purpose
+---
 
-This toolkit is designed as a digital humanities tool for scholarly text analysis, enabling historians to efficiently process large corpora of primary and secondary sources while maintaining control over data and computational workflows.
+## Technical Architecture
+
+```text
+src/
+├── gui/
+│   └── gui.py
+├── ocr/
+│   ├── ocr_core.py
+│   └── engines.py
+├── translation/
+├── summarization/
+├── extraction/
+├── llm/
+└── utilities/
+
+main.py
+```
+
+---
+
+## Installation
+
+### Requirements
+
+- Python 3.10+
+- LM Studio
+- Local language model
+- Local multimodal model (for Vision OCR)
+
+### Install Dependencies
+
+```bash
+pip install -r requirements.txt
+```
+
+### Launch Application
+
+```bash
+python main.py
+```
+
+---
+
+## Intended Audience
+
+- Historians
+- Digital humanists
+- Archivists
+- Genealogists
+- Graduate students
+- Researchers working with scanned documents
+
+---
+
+## Roadmap
+
+- Named entity recognition
+- Metadata extraction
+- Citation extraction
+- Topic modeling
+- Archival document classification
+- Research-note generation
+- Zotero integration
+- DEVONthink integration
+- Handwriting recognition
+
+---
+
+## Philosophy
+
+Historical research should not require surrendering source material to external services.
+
+The Historians Local LLM Toolkit is built around a local-first philosophy that prioritizes privacy, transparency, reproducibility, and researcher control.
+
+---
+
+## License
+
+MIT License
+
+---
+
+## Author
+
+Christopher Goodwin  
+Department of History  
+University of Florida
