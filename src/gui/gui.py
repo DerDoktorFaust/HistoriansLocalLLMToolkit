@@ -29,7 +29,10 @@ from src.summarizer.summarizer_core import analytical_summarize_pdf
 from src.summarizer.summarizer_core import simple_summarize_pdf
 from src.ner.entity_core import named_entity_recognition_pdf
 from src.ocr.ocr_core import run_ocr
-#from src.translation.translation_core import translate_pdf
+try:
+    from src.translation.translation_core import translate_pdf
+except ImportError:
+    translate_pdf = None
 
 
 # ------------------------------------------------------------
@@ -228,68 +231,127 @@ class OCROptionsDialog(QDialog):
 # ------------------------------------------------------------
 # Worker Thread
 # ------------------------------------------------------------
+# ------------------------------------------------------------
+# Worker Thread
+# ------------------------------------------------------------
+
+TASK_OUTPUT_SUFFIXES = {
+    "analytical_summarize": "_analytical_summary.md",
+    "simple_summarize": "_simple_summary.md",
+    "ner": "_entities.md",
+    "ocr": "_ocr.txt",
+    "translate": "_translation.md",
+}
+
+TASK_LABELS = {
+    "analytical_summarize": "Analytical Summarizer",
+    "simple_summarize": "Simple Narrative Summarizer",
+    "ner": "Named Entity Recognition",
+    "ocr": "OCR",
+    "translate": "Translate",
+}
+
 
 class Worker(QThread):
     progress = pyqtSignal(str)
     finished = pyqtSignal(str)
     failed = pyqtSignal(str)
 
-    def __init__(self, task_name: str, pdf_path: Path, save_path: Path, model_path: str, ocr_mode=None, preprocess_mode=None, save_page_images: bool = False, tesseract_language: str = "eng"):
+    def __init__(
+        self,
+        tasks: list[str],
+        pdf_paths: list[Path],
+        model_path: str,
+        ocr_mode: str = "extract_text",
+        preprocess_mode: str = "basic",
+        save_page_images: bool = False,
+        tesseract_language: str = "eng",
+    ):
         super().__init__()
-        self.task_name = task_name
-        self.pdf_path = pdf_path
-        self.save_path = save_path
+        self.tasks = tasks
+        self.pdf_paths = pdf_paths
         self.model_path = model_path
         self.ocr_mode = ocr_mode
         self.preprocess_mode = preprocess_mode
         self.save_page_images = save_page_images
         self.tesseract_language = tesseract_language
-        
+
+    def output_path_for(self, pdf_path: Path, task_name: str) -> Path:
+        suffix = TASK_OUTPUT_SUFFIXES[task_name]
+        return pdf_path.parent / f"{pdf_path.stem}{suffix}"
+
+    def run_task(self, task_name: str, pdf_path: Path) -> str:
+        if task_name == "analytical_summarize":
+            return analytical_summarize_pdf(
+                pdf_path,
+                self.model_path,
+                self.progress.emit,
+            )
+
+        if task_name == "simple_summarize":
+            return simple_summarize_pdf(
+                pdf_path,
+                self.model_path,
+                self.progress.emit,
+            )
+
+        if task_name == "ner":
+            return named_entity_recognition_pdf(
+                pdf_path,
+                self.model_path,
+                self.progress.emit,
+            )
+
+        if task_name == "ocr":
+            result = run_ocr(
+                input_path=pdf_path,
+                output_dir=pdf_path.parent,
+                mode=self.ocr_mode or "extract_text",
+                model_path=self.model_path,
+                preprocess_mode=self.preprocess_mode or "basic",
+                save_txt=False,
+                save_page_images=self.save_page_images,
+                tesseract_language=self.tesseract_language,
+                progress_callback=self.progress.emit,
+            )
+            return result.full_text
+
+        if task_name == "translate":
+            if translate_pdf is None:
+                raise RuntimeError(
+                    "Translation is selected, but src.translation.translation_core.translate_pdf "
+                    "could not be imported. Re-enable or implement the translation backend first."
+                )
+            return translate_pdf(
+                pdf_path,
+                self.model_path,
+                self.progress.emit,
+            )
+
+        raise ValueError(f"Unknown task: {task_name}")
 
     def run(self):
         try:
-            if self.task_name == "analytical_summarize":
-                markdown = analytical_summarize_pdf(
-                    self.pdf_path,
-                    self.model_path,
-                    self.progress.emit,
-                )
-            elif self.task_name == "simple_summarize":
-                markdown = simple_summarize_pdf(
-                    self.pdf_path,
-                    self.model_path,
-                    self.progress.emit,
-                )
-            elif self.task_name == "ner":
-                markdown = named_entity_recognition_pdf(
-                    self.pdf_path,
-                    self.model_path,
-                    self.progress.emit,
-                )
-            elif self.task_name == "ocr":
-                result = run_ocr(
-                    input_path=self.pdf_path,
-                    output_dir=self.save_path.parent,
-                    mode=self.ocr_mode or "extract_text",
-                    model_path=self.model_path,
-                    preprocess_mode=self.preprocess_mode or "basic",
-                    save_txt=False,
-                    save_page_images=self.save_page_images,
-                    tesseract_language=self.tesseract_language,
-                    progress_callback=self.progress.emit,
-                )
-                markdown = result.full_text
-            elif self.task_name == "translate":
-                markdown = translate_pdf(
-                    self.pdf_path,
-                    self.model_path,
-                    self.progress.emit,
-                )
-            else:
-                raise ValueError(f"Unknown task: {self.task_name}")
+            outputs_written: list[Path] = []
 
-            self.save_path.write_text(markdown, encoding="utf-8")
-            self.finished.emit(f"Saved output to:\n{self.save_path}")
+            for pdf_index, pdf_path in enumerate(self.pdf_paths, start=1):
+                self.progress.emit("")
+                self.progress.emit(f"Processing document {pdf_index} of {len(self.pdf_paths)}: {pdf_path.name}")
+
+                for task_index, task_name in enumerate(self.tasks, start=1):
+                    label = TASK_LABELS.get(task_name, task_name)
+                    save_path = self.output_path_for(pdf_path, task_name)
+
+                    self.progress.emit(f"Starting {label} ({task_index} of {len(self.tasks)})")
+                    self.progress.emit(f"Output will be saved to: {save_path}")
+
+                    markdown = self.run_task(task_name, pdf_path)
+                    save_path.write_text(markdown, encoding="utf-8")
+                    outputs_written.append(save_path)
+
+                    self.progress.emit(f"Saved output to: {save_path}")
+
+            self.finished.emit(f"Finished. Wrote {len(outputs_written)} output file(s).")
 
         except Exception:
             self.failed.emit(traceback.format_exc())
@@ -300,11 +362,11 @@ class Worker(QThread):
 # ------------------------------------------------------------
 
 class DropArea(QLabel):
-    pdf_selected = pyqtSignal(Path)
+    pdfs_selected = pyqtSignal(list)
 
     def __init__(self):
         super().__init__()
-        self.setText("Drag and drop a PDF here\nor click to choose one")
+        self.setText("Drag and drop PDF files here\nor click to choose one or more")
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setAcceptDrops(True)
         self.setMinimumHeight(170)
@@ -319,24 +381,32 @@ class DropArea(QLabel):
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
-            urls = event.mimeData().urls()
-            if urls and urls[0].toLocalFile().lower().endswith(".pdf"):
+            pdf_paths = [
+                Path(url.toLocalFile())
+                for url in event.mimeData().urls()
+                if url.toLocalFile().lower().endswith(".pdf")
+            ]
+            if pdf_paths:
                 event.acceptProposedAction()
 
     def dropEvent(self, event):
-        path = Path(event.mimeData().urls()[0].toLocalFile())
-        if path.suffix.lower() == ".pdf":
-            self.pdf_selected.emit(path)
+        pdf_paths = [
+            Path(url.toLocalFile())
+            for url in event.mimeData().urls()
+            if url.toLocalFile().lower().endswith(".pdf")
+        ]
+        if pdf_paths:
+            self.pdfs_selected.emit(pdf_paths)
 
     def mousePressEvent(self, event):
-        file_path, _ = QFileDialog.getOpenFileName(
+        file_paths, _ = QFileDialog.getOpenFileNames(
             self,
-            "Choose PDF",
+            "Choose PDF files",
             "",
             "PDF Files (*.pdf)",
         )
-        if file_path:
-            self.pdf_selected.emit(Path(file_path))
+        if file_paths:
+            self.pdfs_selected.emit([Path(file_path) for file_path in file_paths])
 
 
 # ------------------------------------------------------------
@@ -348,35 +418,60 @@ class HistorianToolkitGUI(QWidget):
         super().__init__()
 
         self.setWindowTitle("Local LLM Toolkit for Historical Text Analysis")
-        self.resize(850, 650)
+        self.resize(900, 760)
 
         self.settings = QSettings("GoodwinDH", "LocalLLMToolkit")
-        self.pdf_path: Path | None = None
+        self.pdf_paths: list[Path] = []
         self.worker: Worker | None = None
 
         self.drop_area = DropArea()
-        self.drop_area.pdf_selected.connect(self.set_pdf)
+        self.drop_area.pdfs_selected.connect(self.set_pdfs)
 
-        self.selected_pdf_label = QLabel("No PDF selected")
+        self.selected_pdf_label = QLabel("No PDFs selected")
 
-        self.analytical_summarize_button = QPushButton("Analytical Summarizer")
-        self.simple_summarize_button = QPushButton("Simple Narrative Summarizer")
-        self.ner_button = QPushButton("Named Entity Recognition")
-        self.ocr_button = QPushButton("OCR")
-        self.translate_button = QPushButton("Translate")
+        self.analytical_summarize_checkbox = QCheckBox("Analytical Summarizer")
+        self.simple_summarize_checkbox = QCheckBox("Simple Narrative Summarizer")
+        self.ner_checkbox = QCheckBox("Named Entity Recognition")
+        self.ocr_checkbox = QCheckBox("OCR")
+        self.translate_checkbox = QCheckBox("Translate")
+
+        self.ocr_mode_combo = QComboBox()
+        self.ocr_mode_combo.addItem("Extract pre-existing OCR text", "extract_text")
+        self.ocr_mode_combo.addItem("Tesseract only", "tesseract")
+        self.ocr_mode_combo.addItem("LLM Vision only", "vision_llm")
+        self.ocr_mode_combo.addItem("Tesseract + LLM Vision", "tesseract_plus_vision")
+
+        self.tesseract_language_combo = QComboBox()
+        for code in get_installed_tesseract_languages():
+            self.tesseract_language_combo.addItem(display_tesseract_language(code), code)
+
+        default_language_index = self.tesseract_language_combo.findData("eng")
+        if default_language_index >= 0:
+            self.tesseract_language_combo.setCurrentIndex(default_language_index)
+
+        self.preprocess_combo = QComboBox()
+        self.preprocess_combo.addItem("None", "none")
+        self.preprocess_combo.addItem("Basic - recommended", "basic")
+        self.preprocess_combo.addItem("Archival - aggressive", "archival")
+        self.preprocess_combo.setCurrentIndex(1)
+
+        self.save_images_checkbox = QCheckBox("Save rendered page images")
+        self.save_images_checkbox.setChecked(False)
+
+        self.ocr_checkbox.toggled.connect(self.update_ocr_options_enabled)
+        self.ocr_mode_combo.currentIndexChanged.connect(self.update_ocr_options_enabled)
+
+        self.process_button = QPushButton("Process Document(s)")
         self.settings_button = QPushButton("Settings")
 
-        self.analytical_summarize_button.clicked.connect(lambda: self.start_task("analytical_summarize"))
-        self.simple_summarize_button.clicked.connect(lambda: self.start_task("simple_summarize"))
-        self.ner_button.clicked.connect(lambda: self.start_task("ner"))
-        self.ocr_button.clicked.connect(self.start_ocr_task)
-        self.translate_button.clicked.connect(lambda: self.start_task("translate"))
+        self.process_button.clicked.connect(self.process_documents)
         self.settings_button.clicked.connect(self.open_settings)
 
         self.progress_output = QTextEdit()
         self.progress_output.setReadOnly(True)
 
         self.build_layout()
+        self.update_ocr_options_enabled()
 
     def build_layout(self):
         main_layout = QVBoxLayout()
@@ -384,14 +479,29 @@ class HistorianToolkitGUI(QWidget):
         main_layout.addWidget(self.drop_area)
         main_layout.addWidget(self.selected_pdf_label)
 
-        button_layout = QHBoxLayout()
-        button_layout.addWidget(self.analytical_summarize_button)
-        button_layout.addWidget(self.simple_summarize_button)
-        button_layout.addWidget(self.ner_button)
-        button_layout.addWidget(self.ocr_button)
-        button_layout.addWidget(self.translate_button)
-        button_layout.addWidget(self.settings_button)
-        main_layout.addLayout(button_layout)
+        tasks_group = QGroupBox("Processing Options")
+        tasks_layout = QVBoxLayout()
+        tasks_layout.addWidget(self.analytical_summarize_checkbox)
+        tasks_layout.addWidget(self.simple_summarize_checkbox)
+        tasks_layout.addWidget(self.ner_checkbox)
+        tasks_layout.addWidget(self.ocr_checkbox)
+        tasks_layout.addWidget(self.translate_checkbox)
+        tasks_group.setLayout(tasks_layout)
+        main_layout.addWidget(tasks_group)
+
+        self.ocr_options_group = QGroupBox("OCR Options")
+        ocr_options_layout = QFormLayout()
+        ocr_options_layout.addRow("OCR method:", self.ocr_mode_combo)
+        ocr_options_layout.addRow("Tesseract language:", self.tesseract_language_combo)
+        ocr_options_layout.addRow("Image preprocessing:", self.preprocess_combo)
+        ocr_options_layout.addRow("", self.save_images_checkbox)
+        self.ocr_options_group.setLayout(ocr_options_layout)
+        main_layout.addWidget(self.ocr_options_group)
+
+        action_layout = QHBoxLayout()
+        action_layout.addWidget(self.process_button)
+        action_layout.addWidget(self.settings_button)
+        main_layout.addLayout(action_layout)
 
         progress_group = QGroupBox("Progress Output")
         progress_layout = QVBoxLayout()
@@ -402,28 +512,94 @@ class HistorianToolkitGUI(QWidget):
 
         self.setLayout(main_layout)
 
-    def set_pdf(self, path: Path):
-        self.pdf_path = path
-        self.selected_pdf_label.setText(f"Selected PDF: {path}")
-        self.log(f"Selected PDF: {path}")
+    def set_pdfs(self, paths: list[Path]):
+        self.pdf_paths = paths
+
+        if len(paths) == 1:
+            label = f"Selected PDF: {paths[0]}"
+        else:
+            names = ", ".join(path.name for path in paths[:5])
+            if len(paths) > 5:
+                names += f", and {len(paths) - 5} more"
+            label = f"Selected PDFs ({len(paths)}): {names}"
+
+        self.selected_pdf_label.setText(label)
+        self.log(label)
 
     def open_settings(self):
         dialog = SettingsDialog(self.settings, self)
         if dialog.exec():
             self.log("Settings saved.")
 
-    def start_task(self, task_name: str):
-        if self.pdf_path is None:
+    def selected_tasks(self) -> list[str]:
+        tasks: list[str] = []
+
+        if self.analytical_summarize_checkbox.isChecked():
+            tasks.append("analytical_summarize")
+        if self.simple_summarize_checkbox.isChecked():
+            tasks.append("simple_summarize")
+        if self.ner_checkbox.isChecked():
+            tasks.append("ner")
+        if self.ocr_checkbox.isChecked():
+            tasks.append("ocr")
+        if self.translate_checkbox.isChecked():
+            tasks.append("translate")
+
+        return tasks
+
+    def selected_ocr_mode(self) -> str:
+        return self.ocr_mode_combo.currentData() or "extract_text"
+
+    def selected_preprocess_mode(self) -> str:
+        return self.preprocess_combo.currentData() or "basic"
+
+    def selected_tesseract_language(self) -> str:
+        return self.tesseract_language_combo.currentData() or "eng"
+
+    def update_ocr_options_enabled(self):
+        ocr_enabled = self.ocr_checkbox.isChecked()
+        uses_tesseract = self.selected_ocr_mode() in {"tesseract", "tesseract_plus_vision"}
+
+        self.ocr_options_group.setEnabled(ocr_enabled)
+        self.ocr_mode_combo.setEnabled(ocr_enabled)
+        self.preprocess_combo.setEnabled(ocr_enabled)
+        self.save_images_checkbox.setEnabled(ocr_enabled)
+        self.tesseract_language_combo.setEnabled(ocr_enabled and uses_tesseract)
+
+    def process_documents(self):
+        if not self.pdf_paths:
             QMessageBox.warning(
                 self,
-                "No PDF Selected",
-                "Please select a PDF first.",
+                "No PDFs Selected",
+                "Please select one or more PDFs first.",
+            )
+            return
+
+        tasks = self.selected_tasks()
+        if not tasks:
+            QMessageBox.warning(
+                self,
+                "No Processing Options Selected",
+                "Please select at least one processing option.",
+            )
+            return
+
+        if "translate" in tasks and translate_pdf is None:
+            QMessageBox.warning(
+                self,
+                "Translation Not Available",
+                "Translation is selected, but the translation backend is not currently available. "
+                "Re-enable or implement src.translation.translation_core.translate_pdf first.",
             )
             return
 
         model_path = self.settings.value("model_path", "").strip()
+        ocr_mode = self.selected_ocr_mode()
 
-        if not model_path:
+        tasks_requiring_model = {"analytical_summarize", "simple_summarize", "ner", "translate"}
+        ocr_requires_model = "ocr" in tasks and ocr_mode in {"vision_llm", "tesseract_plus_vision"}
+
+        if (tasks_requiring_model.intersection(tasks) or ocr_requires_model) and not model_path:
             QMessageBox.warning(
                 self,
                 "Missing Model Setting",
@@ -431,43 +607,28 @@ class HistorianToolkitGUI(QWidget):
             )
             return
 
-        suggested_name = self.pdf_path.with_suffix("").name
+        self.set_controls_enabled(False)
 
-        if task_name == "analytical_summarize":
-            suggested_name += "_analytical_summary.md"
-        elif task_name == "simple_summarize":
-            suggested_name += "_simple_summary.md"
-        elif task_name == "ner":
-            suggested_name += "_entities.md"
-        elif task_name == "translate":
-            suggested_name += "_translation.md"
+        self.log("")
+        self.log("Starting document processing.")
+        self.log(f"Selected document(s): {len(self.pdf_paths)}")
+        self.log("Selected task(s): " + ", ".join(TASK_LABELS[task] for task in tasks))
 
-        save_path_str, _ = QFileDialog.getSaveFileName(
-            self,
-            "Save Markdown Output",
-            str(self.pdf_path.parent / suggested_name),
-            "Markdown Files (*.md)",
-        )
-
-        if not save_path_str:
-            self.log("Save cancelled.")
-            return
-
-        save_path = Path(save_path_str)
-
-        if save_path.suffix.lower() != ".md":
-            save_path = save_path.with_suffix(".md")
-
-        self.set_buttons_enabled(False)
-
-        self.log(f"Starting task: {task_name}")
-        self.log(f"Output will be saved to: {save_path}")
+        if "ocr" in tasks:
+            self.log(f"OCR method: {ocr_mode}")
+            self.log(f"Image preprocessing: {self.selected_preprocess_mode()}")
+            if ocr_mode in {"tesseract", "tesseract_plus_vision"}:
+                self.log(f"Tesseract language: {self.selected_tesseract_language()}")
+            self.log(f"Save rendered page images: {self.save_images_checkbox.isChecked()}")
 
         self.worker = Worker(
-            task_name=task_name,
-            pdf_path=self.pdf_path,
-            save_path=save_path,
+            tasks=tasks,
+            pdf_paths=self.pdf_paths,
             model_path=model_path,
+            ocr_mode=ocr_mode,
+            preprocess_mode=self.selected_preprocess_mode(),
+            save_page_images=self.save_images_checkbox.isChecked(),
+            tesseract_language=self.selected_tesseract_language(),
         )
 
         self.worker.progress.connect(self.log)
@@ -478,95 +639,28 @@ class HistorianToolkitGUI(QWidget):
     def task_finished(self, message: str):
         self.log(message)
         self.log("Done.")
-        self.set_buttons_enabled(True)
+        self.set_controls_enabled(True)
 
     def task_failed(self, error_text: str):
         self.log("ERROR:")
         self.log(error_text)
         QMessageBox.critical(self, "Task Failed", error_text)
-        self.set_buttons_enabled(True)
+        self.set_controls_enabled(True)
 
-    def set_buttons_enabled(self, enabled: bool):
-        self.analytical_summarize_button.setEnabled(enabled)
-        self.simple_summarize_button.setEnabled(enabled)
-        self.ner_button.setEnabled(enabled)
-        self.ocr_button.setEnabled(enabled)
-        self.translate_button.setEnabled(enabled)
+    def set_controls_enabled(self, enabled: bool):
+        self.drop_area.setEnabled(enabled)
+        self.analytical_summarize_checkbox.setEnabled(enabled)
+        self.simple_summarize_checkbox.setEnabled(enabled)
+        self.ner_checkbox.setEnabled(enabled)
+        self.ocr_checkbox.setEnabled(enabled)
+        self.translate_checkbox.setEnabled(enabled)
+        self.process_button.setEnabled(enabled)
         self.settings_button.setEnabled(enabled)
+
+        if enabled:
+            self.update_ocr_options_enabled()
+        else:
+            self.ocr_options_group.setEnabled(False)
 
     def log(self, message: str):
         self.progress_output.append(message)
-        
-    def start_ocr_task(self):
-        if self.pdf_path is None:
-            QMessageBox.warning(
-                self,
-                "No PDF Selected",
-                "Please select a PDF first.",
-            )
-            return
-
-        dialog = OCROptionsDialog(self)
-
-        if not dialog.exec():
-            self.log("OCR cancelled.")
-            return
-
-        ocr_mode = dialog.selected_ocr_mode()
-        preprocess_mode = dialog.selected_preprocess_mode()
-        save_page_images = dialog.should_save_page_images()
-        tesseract_language = dialog.selected_tesseract_language()
-
-        model_path = self.settings.value("model_path", "").strip()
-
-        if ocr_mode in {"vision_llm", "tesseract_plus_vision"} and not model_path:
-            QMessageBox.warning(
-                self,
-                "Missing Model Setting",
-                "Please open Settings and enter a model path or LM Studio server URL.",
-            )
-            return
-
-        suggested_name = self.pdf_path.with_suffix("").name + "_ocr.txt"
-
-        save_path_str, _ = QFileDialog.getSaveFileName(
-            self,
-            "Save OCR Text Output",
-            str(self.pdf_path.parent / suggested_name),
-            "Text Files (*.txt)",
-        )
-
-        if not save_path_str:
-            self.log("Save cancelled.")
-            return
-
-        save_path = Path(save_path_str)
-
-        if save_path.suffix.lower() != ".txt":
-            save_path = save_path.with_suffix(".txt")
-
-        self.set_buttons_enabled(False)
-
-        self.log("Starting OCR")
-        self.log(f"OCR method: {ocr_mode}")
-        self.log(f"Image preprocessing: {preprocess_mode}")
-        if ocr_mode in {"tesseract", "tesseract_plus_vision"}:
-            self.log(f"Tesseract language: {tesseract_language}")
-        self.log(f"Save rendered page images: {save_page_images}")
-        self.log(f"Output will be saved to: {save_path}")
-
-        self.worker = Worker(
-            task_name="ocr",
-            pdf_path=self.pdf_path,
-            save_path=save_path,
-            model_path=model_path,
-            ocr_mode=ocr_mode,
-            preprocess_mode=preprocess_mode,
-            save_page_images=save_page_images,
-            tesseract_language=tesseract_language,
-        )
-
-        self.worker.progress.connect(self.log)
-        self.worker.finished.connect(self.task_finished)
-        self.worker.failed.connect(self.task_failed)
-        self.worker.start()
