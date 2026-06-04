@@ -16,12 +16,13 @@ from PyQt6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QGroupBox,
+    QComboBox,
 )
 
 from src.summarizer.summarizer_core import analytical_summarize_pdf
 from src.summarizer.summarizer_core import simple_summarize_pdf
 from src.ner.entity_core import named_entity_recognition_pdf
-#from src.ocr.ocr_core import ocr_pdf
+from src.ocr.ocr_core import run_ocr
 #from src.translation.translation_core import translate_pdf
 
 
@@ -77,6 +78,52 @@ class SettingsDialog(QDialog):
         self.settings.setValue("model_path", self.model_path_input.text().strip())
         self.accept()
 
+# ------------------------------------------------------------
+# OCR Options Dialog
+# ------------------------------------------------------------
+
+class OCROptionsDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+        self.setWindowTitle("OCR Options")
+        self.resize(420, 180)
+
+        self.ocr_mode_combo = QComboBox()
+        self.ocr_mode_combo.addItem("Extract pre-existing OCR text", "extract_text")
+        self.ocr_mode_combo.addItem("Tesseract only", "tesseract")
+        self.ocr_mode_combo.addItem("LLM Vision only", "vision_llm")
+        self.ocr_mode_combo.addItem("Tesseract + LLM Vision", "tesseract_plus_vision")
+
+        self.preprocess_combo = QComboBox()
+        self.preprocess_combo.addItem("None", "none")
+        self.preprocess_combo.addItem("Basic - recommended", "basic")
+        self.preprocess_combo.addItem("Archival - aggressive", "archival")
+        self.preprocess_combo.setCurrentIndex(1)
+
+        form_layout = QFormLayout()
+        form_layout.addRow("OCR method:", self.ocr_mode_combo)
+        form_layout.addRow("Image preprocessing:", self.preprocess_combo)
+
+        self.buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok
+            | QDialogButtonBox.StandardButton.Cancel
+        )
+        self.buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Start")
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+
+        main_layout = QVBoxLayout()
+        main_layout.addLayout(form_layout)
+        main_layout.addWidget(self.buttons)
+
+        self.setLayout(main_layout)
+
+    def selected_ocr_mode(self) -> str:
+        return self.ocr_mode_combo.currentData()
+
+    def selected_preprocess_mode(self) -> str:
+        return self.preprocess_combo.currentData()
 
 # ------------------------------------------------------------
 # Worker Thread
@@ -87,12 +134,15 @@ class Worker(QThread):
     finished = pyqtSignal(str)
     failed = pyqtSignal(str)
 
-    def __init__(self, task_name: str, pdf_path: Path, save_path: Path, model_path: str):
+    def __init__(self, task_name: str, pdf_path: Path, save_path: Path, model_path: str, ocr_mode=None, preprocess_mode=None):
         super().__init__()
         self.task_name = task_name
         self.pdf_path = pdf_path
         self.save_path = save_path
         self.model_path = model_path
+        self.ocr_mode = ocr_mode
+        self.preprocess_mode = preprocess_mode
+        
 
     def run(self):
         try:
@@ -115,11 +165,16 @@ class Worker(QThread):
                     self.progress.emit,
                 )
             elif self.task_name == "ocr":
-                markdown = ocr_pdf(
-                    self.pdf_path,
-                    self.model_path,
-                    self.progress.emit,
+                result = run_ocr(
+                    input_path=self.pdf_path,
+                    output_dir=self.save_path.parent,
+                    mode=self.ocr_mode or "extract_text",
+                    model_path=self.model_path,
+                    preprocess_mode=self.preprocess_mode or "basic",
+                    save_txt=False,
+                    progress_callback=self.progress.emit,
                 )
+                markdown = result.full_text
             elif self.task_name == "translate":
                 markdown = translate_pdf(
                     self.pdf_path,
@@ -210,7 +265,7 @@ class HistorianToolkitGUI(QWidget):
         self.analytical_summarize_button.clicked.connect(lambda: self.start_task("analytical_summarize"))
         self.simple_summarize_button.clicked.connect(lambda: self.start_task("simple_summarize"))
         self.ner_button.clicked.connect(lambda: self.start_task("ner"))
-        self.ocr_button.clicked.connect(lambda: self.start_task("ocr"))
+        self.ocr_button.clicked.connect(self.start_ocr_task)
         self.translate_button.clicked.connect(lambda: self.start_task("translate"))
         self.settings_button.clicked.connect(self.open_settings)
 
@@ -280,8 +335,6 @@ class HistorianToolkitGUI(QWidget):
             suggested_name += "_simple_summary.md"
         elif task_name == "ner":
             suggested_name += "_entities.md"
-        elif task_name == "ocr":
-            suggested_name += "_ocr.md"
         elif task_name == "translate":
             suggested_name += "_translation.md"
 
@@ -339,3 +392,70 @@ class HistorianToolkitGUI(QWidget):
 
     def log(self, message: str):
         self.progress_output.append(message)
+        
+    def start_ocr_task(self):
+        if self.pdf_path is None:
+            QMessageBox.warning(
+                self,
+                "No PDF Selected",
+                "Please select a PDF first.",
+            )
+            return
+
+        dialog = OCROptionsDialog(self)
+
+        if not dialog.exec():
+            self.log("OCR cancelled.")
+            return
+
+        ocr_mode = dialog.selected_ocr_mode()
+        preprocess_mode = dialog.selected_preprocess_mode()
+
+        model_path = self.settings.value("model_path", "").strip()
+
+        if ocr_mode in {"vision_llm", "tesseract_plus_vision"} and not model_path:
+            QMessageBox.warning(
+                self,
+                "Missing Model Setting",
+                "Please open Settings and enter a model path or LM Studio server URL.",
+            )
+            return
+
+        suggested_name = self.pdf_path.with_suffix("").name + "_ocr.txt"
+
+        save_path_str, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save OCR Text Output",
+            str(self.pdf_path.parent / suggested_name),
+            "Text Files (*.txt)",
+        )
+
+        if not save_path_str:
+            self.log("Save cancelled.")
+            return
+
+        save_path = Path(save_path_str)
+
+        if save_path.suffix.lower() != ".txt":
+            save_path = save_path.with_suffix(".txt")
+
+        self.set_buttons_enabled(False)
+
+        self.log("Starting OCR")
+        self.log(f"OCR method: {ocr_mode}")
+        self.log(f"Image preprocessing: {preprocess_mode}")
+        self.log(f"Output will be saved to: {save_path}")
+
+        self.worker = Worker(
+            task_name="ocr",
+            pdf_path=self.pdf_path,
+            save_path=save_path,
+            model_path=model_path,
+            ocr_mode=ocr_mode,
+            preprocess_mode=preprocess_mode,
+        )
+
+        self.worker.progress.connect(self.log)
+        self.worker.finished.connect(self.task_finished)
+        self.worker.failed.connect(self.task_failed)
+        self.worker.start()

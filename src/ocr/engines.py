@@ -1,21 +1,8 @@
 from abc import ABC, abstractmethod
 from pathlib import Path
+
 from .models import OCRResult
-
-def get_ocr_engine(mode: str, model_path: str | None = None, server_url: str | None = None) -> OCREngine:
-    if mode == "tesseract":
-        return TesseractEngine()
-
-    if mode == "vision_llm":
-        return VisionLLMEngine(model_path=model_path, server_url=server_url)
-
-    if mode == "tesseract_plus_vision":
-        return CombinedOCREngine(
-            tesseract=TesseractEngine(),
-            vision=VisionLLMEngine(model_path=model_path, server_url=server_url),
-        )
-
-    raise ValueError(f"Unknown OCR mode: {mode}")
+from .image_prep import PreprocessMode, preprocess_image
 
 
 class OCREngine(ABC):
@@ -29,12 +16,14 @@ class OCREngine(ABC):
 class TesseractEngine(OCREngine):
     name = "tesseract"
 
+    def __init__(self, preprocess_mode: PreprocessMode | str = PreprocessMode.BASIC):
+        self.preprocess_mode = PreprocessMode(preprocess_mode)
+
     def ocr_image(self, image_path: Path, page_number: int | None = None) -> OCRResult:
         try:
             import pytesseract
-            from PIL import Image
 
-            image = Image.open(image_path)
+            image = preprocess_image(image_path, self.preprocess_mode)
             text = pytesseract.image_to_string(image)
 
             return OCRResult(
@@ -60,14 +49,14 @@ class VisionLLMEngine(OCREngine):
         self.server_url = server_url
 
     def ocr_image(self, image_path: Path, page_number: int | None = None) -> OCRResult:
-        # Stub for now
         return OCRResult(
             text="",
             engine=self.name,
             page_number=page_number,
             error="Vision LLM OCR not implemented yet.",
         )
-        
+
+
 class CombinedOCREngine(OCREngine):
     name = "tesseract_plus_vision_llm"
 
@@ -96,3 +85,24 @@ class CombinedOCREngine(OCREngine):
             page_number=page_number,
             error=errors,
         )
+
+
+def get_ocr_engine(
+    mode: str,
+    model_path: str | None = None,
+    server_url: str | None = None,
+    preprocess_mode: str = "basic",
+) -> OCREngine:
+    if mode == "tesseract":
+        return TesseractEngine(preprocess_mode=preprocess_mode)
+
+    if mode == "vision_llm":
+        return VisionLLMEngine(model_path=model_path, server_url=server_url)
+
+    if mode == "tesseract_plus_vision":
+        return CombinedOCREngine(
+            tesseract=TesseractEngine(preprocess_mode=preprocess_mode),
+            vision=VisionLLMEngine(model_path=model_path, server_url=server_url),
+        )
+
+    raise ValueError(f"Unknown OCR mode: {mode}")

@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 import fitz  # PyMuPDF
 
@@ -39,24 +39,26 @@ class OCRDocumentResult:
         return "\n".join(parts).strip()
 
 
+def report_progress(
+    progress_callback: Optional[Callable[[str], None]],
+    message: str,
+) -> None:
+    if progress_callback:
+        progress_callback(message)
+
+
 def run_ocr(
     input_path: str | Path,
     output_dir: str | Path,
     mode: OCRMode | str,
     model_path: Optional[str] = None,
     server_url: Optional[str] = None,
+    preprocess_mode: str = "basic",
     dpi: int = 300,
     save_txt: bool = True,
+    progress_callback: Optional[Callable[[str], None]] = None,
 ) -> OCRDocumentResult:
-    """
-    Main OCR entry point.
-
-    Modes:
-    - extract_text: extract existing embedded/OCR text from PDF
-    - tesseract: render pages as images, then OCR with Tesseract
-    - vision_llm: render pages as images, then OCR with vision LLM
-    - tesseract_plus_vision: run both engines and combine output
-    """
+    report_progress(progress_callback, "Preparing OCR job...")
 
     input_path = Path(input_path)
     output_dir = Path(output_dir)
@@ -67,45 +69,67 @@ def run_ocr(
     if not input_path.exists():
         raise FileNotFoundError(f"Input file does not exist: {input_path}")
 
+    report_progress(progress_callback, f"Input file: {input_path.name}")
+    report_progress(progress_callback, f"OCR mode: {mode.value}")
+    report_progress(progress_callback, f"Preprocessing mode: {preprocess_mode}")
+
     if input_path.suffix.lower() == ".pdf":
         if mode == OCRMode.EXTRACT_TEXT:
-            result = extract_existing_pdf_text(input_path)
+            report_progress(progress_callback, "Extracting existing PDF text...")
+            result = extract_existing_pdf_text(
+                input_path=input_path,
+                progress_callback=progress_callback,
+            )
         else:
+            report_progress(progress_callback, "Rendering PDF pages for OCR...")
             result = ocr_pdf_pages(
                 input_path=input_path,
                 output_dir=output_dir,
                 mode=mode,
                 model_path=model_path,
                 server_url=server_url,
+                preprocess_mode=preprocess_mode,
                 dpi=dpi,
+                progress_callback=progress_callback,
             )
     else:
         if mode == OCRMode.EXTRACT_TEXT:
             raise ValueError("extract_text mode only works with PDFs.")
 
+        report_progress(progress_callback, "Running OCR on image file...")
         result = ocr_image_file(
             input_path=input_path,
             mode=mode,
             model_path=model_path,
             server_url=server_url,
+            preprocess_mode=preprocess_mode,
+            progress_callback=progress_callback,
         )
 
     if save_txt:
+        report_progress(progress_callback, "Saving OCR text output...")
         save_ocr_text(result, output_dir)
+
+    report_progress(progress_callback, "OCR finished.")
 
     return result
 
 
-def extract_existing_pdf_text(input_path: Path) -> OCRDocumentResult:
-    """
-    Extracts embedded/OCR text already present in a PDF.
-    Does not run image OCR.
-    """
-
+def extract_existing_pdf_text(
+    input_path: Path,
+    progress_callback: Optional[Callable[[str], None]] = None,
+) -> OCRDocumentResult:
     pages: list[OCRResult] = []
 
     with fitz.open(input_path) as doc:
+        total_pages = len(doc)
+
         for index, page in enumerate(doc, start=1):
+            report_progress(
+                progress_callback,
+                f"Extracting text from page {index} of {total_pages}...",
+            )
+
             try:
                 text = page.get_text("text") or ""
                 pages.append(
@@ -138,12 +162,10 @@ def ocr_pdf_pages(
     mode: OCRMode,
     model_path: Optional[str] = None,
     server_url: Optional[str] = None,
+    preprocess_mode: str = "basic",
     dpi: int = 300,
+    progress_callback: Optional[Callable[[str], None]] = None,
 ) -> OCRDocumentResult:
-    """
-    Renders each PDF page to an image, then runs the selected OCR engine.
-    """
-
     page_image_dir = output_dir / f"{input_path.stem}_page_images"
     page_image_dir.mkdir(parents=True, exist_ok=True)
 
@@ -151,12 +173,20 @@ def ocr_pdf_pages(
         mode=mode.value,
         model_path=model_path,
         server_url=server_url,
+        preprocess_mode=preprocess_mode,
     )
 
     pages: list[OCRResult] = []
 
     with fitz.open(input_path) as doc:
+        total_pages = len(doc)
+
         for index, page in enumerate(doc, start=1):
+            report_progress(
+                progress_callback,
+                f"Rendering page {index} of {total_pages}...",
+            )
+
             image_path = render_page_to_image(
                 page=page,
                 output_dir=page_image_dir,
@@ -165,10 +195,21 @@ def ocr_pdf_pages(
                 dpi=dpi,
             )
 
+            report_progress(
+                progress_callback,
+                f"Running OCR on page {index} of {total_pages}...",
+            )
+
             result = engine.ocr_image(
                 image_path=image_path,
                 page_number=index,
             )
+
+            if result.error:
+                report_progress(
+                    progress_callback,
+                    f"OCR warning on page {index}: {result.error}",
+                )
 
             pages.append(result)
 
@@ -184,21 +225,25 @@ def ocr_image_file(
     mode: OCRMode,
     model_path: Optional[str] = None,
     server_url: Optional[str] = None,
+    preprocess_mode: str = "basic",
+    progress_callback: Optional[Callable[[str], None]] = None,
 ) -> OCRDocumentResult:
-    """
-    OCRs a single image file.
-    """
-
     engine = get_ocr_engine(
         mode=mode.value,
         model_path=model_path,
         server_url=server_url,
+        preprocess_mode=preprocess_mode,
     )
+
+    report_progress(progress_callback, f"Running {mode.value} OCR on image...")
 
     result = engine.ocr_image(
         image_path=input_path,
         page_number=1,
     )
+
+    if result.error:
+        report_progress(progress_callback, f"OCR warning: {result.error}")
 
     return OCRDocumentResult(
         input_path=input_path,
@@ -214,10 +259,6 @@ def render_page_to_image(
     page_number: int,
     dpi: int = 300,
 ) -> Path:
-    """
-    Renders a PDF page to a PNG image.
-    """
-
     zoom = dpi / 72
     matrix = fitz.Matrix(zoom, zoom)
     pix = page.get_pixmap(matrix=matrix, alpha=False)
@@ -229,10 +270,6 @@ def render_page_to_image(
 
 
 def save_ocr_text(result: OCRDocumentResult, output_dir: Path) -> Path:
-    """
-    Saves OCR output as a plain text file.
-    """
-
     output_path = output_dir / f"{result.input_path.stem}_{result.mode.value}.txt"
     output_path.write_text(result.full_text, encoding="utf-8")
     return output_path
