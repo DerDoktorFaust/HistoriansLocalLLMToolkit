@@ -56,10 +56,11 @@ All processing occurs locally using models hosted through LM Studio (or another 
 ### Translation
 
 - Automatic source-language detection
-- User-selectable target language
+- User-selectable target language (approximately 30 languages)
 - Batch translation of multiple PDFs
 - Preservation of document structure
 - Local processing
+- Translation dependent upon LLM capabilities (i.e. languages less commonly trained for LLMs will produce poorer results)
 
 ### AI-Assisted Summarization
 
