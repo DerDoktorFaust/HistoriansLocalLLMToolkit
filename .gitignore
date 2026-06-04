@@ -29,3 +29,13 @@ models/
 
 # Jupyter
 .ipynb_checkpoints/
+
+# Build stuff
+build/
+dist/
+*.app
+*.dmg
+*.zip
+*.spec
+assets/icon.iconset/
+__pycache__/
