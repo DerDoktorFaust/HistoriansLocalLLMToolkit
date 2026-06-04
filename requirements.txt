@@ -20,12 +20,14 @@ mlx-lm==0.31.3
 mlx-metal==0.31.2
 numpy==2.4.4
 packaging==26.2
+pillow==12.2.0
 protobuf==7.34.1
 Pygments==2.20.0
 PyMuPDF==1.27.2.3
 PyQt6==6.11.0
 PyQt6-Qt6==6.11.0
 PyQt6_sip==13.11.1
+pytesseract==0.3.13
 PyYAML==6.0.3
 regex==2026.4.4
 requests==2.33.1
