@@ -23,6 +23,9 @@ from PyQt6.QtWidgets import (
     QGroupBox,
     QComboBox,
     QCheckBox,
+    QListWidget,
+    QListWidgetItem,
+    QAbstractItemView,
 )
 
 from src.summarizer.summarizer_core import analytical_summarize_pdf
@@ -383,55 +386,59 @@ class Worker(QThread):
 
 
 # ------------------------------------------------------------
-# Drag-and-drop PDF area
+# Drag-and-drop PDF list
 # ------------------------------------------------------------
 
-class DropArea(QLabel):
-    pdfs_selected = pyqtSignal(list)
+class PDFListWidget(QListWidget):
+    pdfs_dropped = pyqtSignal(list)
 
     def __init__(self):
         super().__init__()
-        self.setText("Drag and drop PDF files here\nor click to choose one or more")
-        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setAcceptDrops(True)
+        self.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.setMinimumHeight(170)
+        self.setToolTip("Drag and drop PDF files here.")
         self.setStyleSheet("""
-            QLabel {
+            QListWidget {
                 border: 2px dashed #777;
                 border-radius: 12px;
-                padding: 24px;
-                font-size: 16px;
+                padding: 8px;
+                font-size: 14px;
             }
         """)
 
     def dragEnterEvent(self, event):
-        if event.mimeData().hasUrls():
-            pdf_paths = [
-                Path(url.toLocalFile())
-                for url in event.mimeData().urls()
-                if url.toLocalFile().lower().endswith(".pdf")
-            ]
-            if pdf_paths:
-                event.acceptProposedAction()
+        if self._event_has_pdf_urls(event):
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event):
+        if self._event_has_pdf_urls(event):
+            event.acceptProposedAction()
+        else:
+            event.ignore()
 
     def dropEvent(self, event):
-        pdf_paths = [
+        pdf_paths = self._pdf_paths_from_event(event)
+        if pdf_paths:
+            self.pdfs_dropped.emit(pdf_paths)
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def _event_has_pdf_urls(self, event) -> bool:
+        return bool(self._pdf_paths_from_event(event))
+
+    def _pdf_paths_from_event(self, event) -> list[Path]:
+        if not event.mimeData().hasUrls():
+            return []
+
+        return [
             Path(url.toLocalFile())
             for url in event.mimeData().urls()
-            if url.toLocalFile().lower().endswith(".pdf")
+            if url.isLocalFile() and url.toLocalFile().lower().endswith(".pdf")
         ]
-        if pdf_paths:
-            self.pdfs_selected.emit(pdf_paths)
-
-    def mousePressEvent(self, event):
-        file_paths, _ = QFileDialog.getOpenFileNames(
-            self,
-            "Choose PDF files",
-            "",
-            "PDF Files (*.pdf)",
-        )
-        if file_paths:
-            self.pdfs_selected.emit([Path(file_path) for file_path in file_paths])
 
 
 # ------------------------------------------------------------
@@ -449,8 +456,16 @@ class HistorianToolkitGUI(QWidget):
         self.pdf_paths: list[Path] = []
         self.worker: Worker | None = None
 
-        self.drop_area = DropArea()
-        self.drop_area.pdfs_selected.connect(self.set_pdfs)
+        self.pdf_list = PDFListWidget()
+        self.pdf_list.pdfs_dropped.connect(self.add_pdfs)
+
+        self.add_files_button = QPushButton("Add Files")
+        self.remove_files_button = QPushButton("Remove Selected")
+        self.clear_files_button = QPushButton("Clear All")
+
+        self.add_files_button.clicked.connect(self.choose_pdfs)
+        self.remove_files_button.clicked.connect(self.remove_selected_pdfs)
+        self.clear_files_button.clicked.connect(self.clear_pdfs)
 
         self.selected_pdf_label = QLabel("No PDFs selected")
 
@@ -493,9 +508,11 @@ class HistorianToolkitGUI(QWidget):
 
         self.process_button = QPushButton("Process Document(s)")
         self.settings_button = QPushButton("Settings")
+        self.exit_button = QPushButton("Exit")
 
         self.process_button.clicked.connect(self.process_documents)
         self.settings_button.clicked.connect(self.open_settings)
+        self.exit_button.clicked.connect(self.close)
 
         self.progress_output = QTextEdit()
         self.progress_output.setReadOnly(True)
@@ -506,8 +523,20 @@ class HistorianToolkitGUI(QWidget):
     def build_layout(self):
         main_layout = QVBoxLayout()
 
-        main_layout.addWidget(self.drop_area)
-        main_layout.addWidget(self.selected_pdf_label)
+        files_group = QGroupBox("Documents")
+        files_layout = QVBoxLayout()
+        files_layout.addWidget(QLabel("Drag PDF files into the list below, or use Add Files."))
+        files_layout.addWidget(self.pdf_list)
+
+        file_button_layout = QHBoxLayout()
+        file_button_layout.addWidget(self.add_files_button)
+        file_button_layout.addWidget(self.remove_files_button)
+        file_button_layout.addWidget(self.clear_files_button)
+        files_layout.addLayout(file_button_layout)
+        files_layout.addWidget(self.selected_pdf_label)
+
+        files_group.setLayout(files_layout)
+        main_layout.addWidget(files_group)
 
         tasks_group = QGroupBox("Processing Options")
         tasks_layout = QVBoxLayout()
@@ -538,6 +567,7 @@ class HistorianToolkitGUI(QWidget):
         action_layout = QHBoxLayout()
         action_layout.addWidget(self.process_button)
         action_layout.addWidget(self.settings_button)
+        action_layout.addWidget(self.exit_button)
         main_layout.addLayout(action_layout)
 
         progress_group = QGroupBox("Progress Output")
@@ -549,19 +579,82 @@ class HistorianToolkitGUI(QWidget):
 
         self.setLayout(main_layout)
 
-    def set_pdfs(self, paths: list[Path]):
-        self.pdf_paths = paths
+    def choose_pdfs(self):
+        file_paths, _ = QFileDialog.getOpenFileNames(
+            self,
+            "Choose PDF files",
+            "",
+            "PDF Files (*.pdf)",
+        )
+        if file_paths:
+            self.add_pdfs([Path(file_path) for file_path in file_paths])
 
-        if len(paths) == 1:
-            label = f"Selected PDF: {paths[0]}"
+    def add_pdfs(self, paths: list[Path]):
+        existing_paths = {path.resolve() for path in self.pdf_paths}
+        added_paths: list[Path] = []
+
+        for path in paths:
+            path = Path(path)
+            if path.suffix.lower() != ".pdf":
+                continue
+
+            resolved_path = path.resolve()
+            if resolved_path in existing_paths:
+                continue
+
+            self.pdf_paths.append(path)
+            existing_paths.add(resolved_path)
+            added_paths.append(path)
+
+            item = QListWidgetItem(path.name)
+            item.setToolTip(str(path))
+            item.setData(Qt.ItemDataRole.UserRole, path)
+            self.pdf_list.addItem(item)
+
+        self.update_selected_pdf_label()
+
+        if added_paths:
+            self.log(f"Added {len(added_paths)} PDF file(s).")
+
+    def remove_selected_pdfs(self):
+        selected_items = self.pdf_list.selectedItems()
+        if not selected_items:
+            return
+
+        selected_paths = {item.data(Qt.ItemDataRole.UserRole).resolve() for item in selected_items}
+        self.pdf_paths = [path for path in self.pdf_paths if path.resolve() not in selected_paths]
+
+        for item in selected_items:
+            row = self.pdf_list.row(item)
+            self.pdf_list.takeItem(row)
+
+        self.update_selected_pdf_label()
+        self.log(f"Removed {len(selected_items)} PDF file(s).")
+
+    def clear_pdfs(self):
+        if not self.pdf_paths:
+            return
+
+        count = len(self.pdf_paths)
+        self.pdf_paths.clear()
+        self.pdf_list.clear()
+        self.update_selected_pdf_label()
+        self.log(f"Cleared {count} PDF file(s).")
+
+    def update_selected_pdf_label(self):
+        count = len(self.pdf_paths)
+
+        if count == 0:
+            label = "No PDFs selected"
+        elif count == 1:
+            label = f"Selected PDF: {self.pdf_paths[0]}"
         else:
-            names = ", ".join(path.name for path in paths[:5])
-            if len(paths) > 5:
-                names += f", and {len(paths) - 5} more"
-            label = f"Selected PDFs ({len(paths)}): {names}"
+            names = ", ".join(path.name for path in self.pdf_paths[:5])
+            if count > 5:
+                names += f", and {count - 5} more"
+            label = f"Selected PDFs ({count}): {names}"
 
         self.selected_pdf_label.setText(label)
-        self.log(label)
 
     def open_settings(self):
         dialog = SettingsDialog(self.settings, self)
@@ -700,7 +793,10 @@ class HistorianToolkitGUI(QWidget):
         self.set_controls_enabled(True)
 
     def set_controls_enabled(self, enabled: bool):
-        self.drop_area.setEnabled(enabled)
+        self.pdf_list.setEnabled(enabled)
+        self.add_files_button.setEnabled(enabled)
+        self.remove_files_button.setEnabled(enabled)
+        self.clear_files_button.setEnabled(enabled)
         self.analytical_summarize_checkbox.setEnabled(enabled)
         self.simple_summarize_checkbox.setEnabled(enabled)
         self.ner_checkbox.setEnabled(enabled)
@@ -708,6 +804,7 @@ class HistorianToolkitGUI(QWidget):
         self.translate_checkbox.setEnabled(enabled)
         self.process_button.setEnabled(enabled)
         self.settings_button.setEnabled(enabled)
+        self.exit_button.setEnabled(enabled)
 
         if enabled:
             self.update_ocr_options_enabled()
