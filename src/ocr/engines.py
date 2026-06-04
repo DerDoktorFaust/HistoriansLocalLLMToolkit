@@ -16,15 +16,20 @@ class OCREngine(ABC):
 class TesseractEngine(OCREngine):
     name = "tesseract"
 
-    def __init__(self, preprocess_mode: PreprocessMode | str = PreprocessMode.BASIC):
+    def __init__(
+        self,
+        preprocess_mode: PreprocessMode | str = PreprocessMode.BASIC,
+        language: str = "eng",
+    ):
         self.preprocess_mode = PreprocessMode(preprocess_mode)
+        self.language = language or "eng"
 
     def ocr_image(self, image_path: Path, page_number: int | None = None) -> OCRResult:
         try:
             import pytesseract
 
             image = preprocess_image(image_path, self.preprocess_mode)
-            text = pytesseract.image_to_string(image)
+            text = pytesseract.image_to_string(image, lang=self.language)
 
             return OCRResult(
                 text=text,
@@ -179,16 +184,23 @@ def get_ocr_engine(
     model_path: str | None = None,
     server_url: str | None = None,
     preprocess_mode: str = "basic",
+    tesseract_language: str = "eng",
 ) -> OCREngine:
     if mode == "tesseract":
-        return TesseractEngine(preprocess_mode=preprocess_mode)
+        return TesseractEngine(
+            preprocess_mode=preprocess_mode,
+            language=tesseract_language,
+        )
 
     if mode == "vision_llm":
         return VisionLLMEngine(model_path=model_path, server_url=server_url)
 
     if mode == "tesseract_plus_vision":
         return CombinedOCREngine(
-            tesseract=TesseractEngine(preprocess_mode=preprocess_mode),
+            tesseract=TesseractEngine(
+                preprocess_mode=preprocess_mode,
+                language=tesseract_language,
+            ),
             vision=VisionLLMEngine(model_path=model_path, server_url=server_url),
         )
 

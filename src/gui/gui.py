@@ -1,6 +1,11 @@
 import traceback
 from pathlib import Path
 
+try:
+    import pytesseract
+except ImportError:
+    pytesseract = None
+
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSettings
 from PyQt6.QtWidgets import (
     QWidget,
@@ -80,6 +85,74 @@ class SettingsDialog(QDialog):
         self.accept()
 
 # ------------------------------------------------------------
+# Tesseract language helpers
+# ------------------------------------------------------------
+
+TESSERACT_LANGUAGE_NAMES = {
+    "afr": "Afrikaans",
+    "ara": "Arabic",
+    "ben": "Bengali",
+    "bul": "Bulgarian",
+    "cat": "Catalan",
+    "ces": "Czech",
+    "chi_sim": "Chinese - Simplified",
+    "chi_tra": "Chinese - Traditional",
+    "dan": "Danish",
+    "deu": "German",
+    "ell": "Greek",
+    "eng": "English",
+    "enm": "English, Middle",
+    "fin": "Finnish",
+    "fra": "French",
+    "frk": "German, Fraktur",
+    "frm": "French, Middle",
+    "heb": "Hebrew",
+    "hin": "Hindi",
+    "hrv": "Croatian",
+    "hun": "Hungarian",
+    "ita": "Italian",
+    "ita_old": "Italian, Old",
+    "jpn": "Japanese",
+    "lat": "Latin",
+    "nld": "Dutch",
+    "nor": "Norwegian",
+    "pol": "Polish",
+    "por": "Portuguese",
+    "ron": "Romanian",
+    "rus": "Russian",
+    "slk": "Slovak",
+    "slv": "Slovenian",
+    "spa": "Spanish",
+    "swe": "Swedish",
+    "tur": "Turkish",
+    "ukr": "Ukrainian",
+}
+
+
+def get_installed_tesseract_languages() -> list[str]:
+    """Return installed Tesseract OCR languages, excluding OSD.
+
+    Falls back to English if Tesseract or pytesseract is unavailable so the
+    dialog remains usable and the error can surface later during OCR.
+    """
+    if pytesseract is None:
+        return ["eng"]
+
+    try:
+        languages = pytesseract.get_languages(config="")
+    except Exception:
+        return ["eng"]
+
+    languages = sorted(lang for lang in languages if lang != "osd")
+    return languages or ["eng"]
+
+
+def display_tesseract_language(code: str) -> str:
+    name = TESSERACT_LANGUAGE_NAMES.get(code, code)
+    return f"{name} ({code})"
+
+
+# ------------------------------------------------------------
 # OCR Options Dialog
 # ------------------------------------------------------------
 
@@ -88,13 +161,23 @@ class OCROptionsDialog(QDialog):
         super().__init__(parent)
 
         self.setWindowTitle("OCR Options")
-        self.resize(420, 180)
+        self.resize(460, 220)
 
         self.ocr_mode_combo = QComboBox()
         self.ocr_mode_combo.addItem("Extract pre-existing OCR text", "extract_text")
         self.ocr_mode_combo.addItem("Tesseract only", "tesseract")
         self.ocr_mode_combo.addItem("LLM Vision only", "vision_llm")
         self.ocr_mode_combo.addItem("Tesseract + LLM Vision", "tesseract_plus_vision")
+
+        self.tesseract_language_combo = QComboBox()
+        for code in get_installed_tesseract_languages():
+            self.tesseract_language_combo.addItem(display_tesseract_language(code), code)
+
+        default_language_index = self.tesseract_language_combo.findData("eng")
+        if default_language_index >= 0:
+            self.tesseract_language_combo.setCurrentIndex(default_language_index)
+
+        self.ocr_mode_combo.currentIndexChanged.connect(self.update_tesseract_language_enabled)
 
         self.preprocess_combo = QComboBox()
         self.preprocess_combo.addItem("None", "none")
@@ -107,6 +190,7 @@ class OCROptionsDialog(QDialog):
 
         form_layout = QFormLayout()
         form_layout.addRow("OCR method:", self.ocr_mode_combo)
+        form_layout.addRow("Tesseract language:", self.tesseract_language_combo)
         form_layout.addRow("Image preprocessing:", self.preprocess_combo)
         form_layout.addRow("", self.save_images_checkbox)
 
@@ -123,12 +207,20 @@ class OCROptionsDialog(QDialog):
         main_layout.addWidget(self.buttons)
 
         self.setLayout(main_layout)
+        self.update_tesseract_language_enabled()
+
+    def update_tesseract_language_enabled(self):
+        uses_tesseract = self.selected_ocr_mode() in {"tesseract", "tesseract_plus_vision"}
+        self.tesseract_language_combo.setEnabled(uses_tesseract)
 
     def selected_ocr_mode(self) -> str:
         return self.ocr_mode_combo.currentData()
 
     def selected_preprocess_mode(self) -> str:
         return self.preprocess_combo.currentData()
+
+    def selected_tesseract_language(self) -> str:
+        return self.tesseract_language_combo.currentData() or "eng"
     
     def should_save_page_images(self) -> bool:
         return self.save_images_checkbox.isChecked()
@@ -142,7 +234,7 @@ class Worker(QThread):
     finished = pyqtSignal(str)
     failed = pyqtSignal(str)
 
-    def __init__(self, task_name: str, pdf_path: Path, save_path: Path, model_path: str, ocr_mode=None, preprocess_mode=None, save_page_images: bool = False):
+    def __init__(self, task_name: str, pdf_path: Path, save_path: Path, model_path: str, ocr_mode=None, preprocess_mode=None, save_page_images: bool = False, tesseract_language: str = "eng"):
         super().__init__()
         self.task_name = task_name
         self.pdf_path = pdf_path
@@ -151,6 +243,7 @@ class Worker(QThread):
         self.ocr_mode = ocr_mode
         self.preprocess_mode = preprocess_mode
         self.save_page_images = save_page_images
+        self.tesseract_language = tesseract_language
         
 
     def run(self):
@@ -182,6 +275,7 @@ class Worker(QThread):
                     preprocess_mode=self.preprocess_mode or "basic",
                     save_txt=False,
                     save_page_images=self.save_page_images,
+                    tesseract_language=self.tesseract_language,
                     progress_callback=self.progress.emit,
                 )
                 markdown = result.full_text
@@ -421,6 +515,7 @@ class HistorianToolkitGUI(QWidget):
         ocr_mode = dialog.selected_ocr_mode()
         preprocess_mode = dialog.selected_preprocess_mode()
         save_page_images = dialog.should_save_page_images()
+        tesseract_language = dialog.selected_tesseract_language()
 
         model_path = self.settings.value("model_path", "").strip()
 
@@ -455,6 +550,8 @@ class HistorianToolkitGUI(QWidget):
         self.log("Starting OCR")
         self.log(f"OCR method: {ocr_mode}")
         self.log(f"Image preprocessing: {preprocess_mode}")
+        if ocr_mode in {"tesseract", "tesseract_plus_vision"}:
+            self.log(f"Tesseract language: {tesseract_language}")
         self.log(f"Save rendered page images: {save_page_images}")
         self.log(f"Output will be saved to: {save_path}")
 
@@ -466,6 +563,7 @@ class HistorianToolkitGUI(QWidget):
             ocr_mode=ocr_mode,
             preprocess_mode=preprocess_mode,
             save_page_images=save_page_images,
+            tesseract_language=tesseract_language,
         )
 
         self.worker.progress.connect(self.log)

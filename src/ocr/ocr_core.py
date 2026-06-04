@@ -58,6 +58,7 @@ def run_ocr(
     dpi: int = 300,
     save_txt: bool = True,
     save_page_images: bool = False,
+    tesseract_language: str = "eng",
     progress_callback: Optional[Callable[[str], None]] = None,
 ) -> OCRDocumentResult:
     report_progress(progress_callback, "Preparing OCR job...")
@@ -75,6 +76,8 @@ def run_ocr(
     report_progress(progress_callback, f"OCR mode: {mode.value}")
     report_progress(progress_callback, f"Preprocessing mode: {preprocess_mode}")
     report_progress(progress_callback, f"Save page images: {save_page_images}")
+    if mode in {OCRMode.TESSERACT, OCRMode.TESSERACT_PLUS_VISION}:
+        report_progress(progress_callback, f"Tesseract language: {tesseract_language}")
 
     if input_path.suffix.lower() == ".pdf":
         if mode == OCRMode.EXTRACT_TEXT:
@@ -94,6 +97,7 @@ def run_ocr(
                 preprocess_mode=preprocess_mode,
                 dpi=dpi,
                 save_page_images=save_page_images,
+                tesseract_language=tesseract_language,
                 progress_callback=progress_callback,
             )
     else:
@@ -107,6 +111,7 @@ def run_ocr(
             model_path=model_path,
             server_url=server_url,
             preprocess_mode=preprocess_mode,
+            tesseract_language=tesseract_language,
             progress_callback=progress_callback,
         )
 
@@ -169,6 +174,7 @@ def ocr_pdf_pages(
     preprocess_mode: str = "basic",
     dpi: int = 300,
     save_page_images: bool = False,
+    tesseract_language: str = "eng",
     progress_callback: Optional[Callable[[str], None]] = None,
 ) -> OCRDocumentResult:
     page_image_dir = output_dir / f"{input_path.stem}_page_images"
@@ -179,6 +185,7 @@ def ocr_pdf_pages(
         model_path=model_path,
         server_url=server_url,
         preprocess_mode=preprocess_mode,
+        tesseract_language=tesseract_language,
     )
 
     pages: list[OCRResult] = []
@@ -240,6 +247,7 @@ def ocr_image_file(
     model_path: Optional[str] = None,
     server_url: Optional[str] = None,
     preprocess_mode: str = "basic",
+    tesseract_language: str = "eng",
     progress_callback: Optional[Callable[[str], None]] = None,
 ) -> OCRDocumentResult:
     engine = get_ocr_engine(
@@ -247,6 +255,7 @@ def ocr_image_file(
         model_path=model_path,
         server_url=server_url,
         preprocess_mode=preprocess_mode,
+        tesseract_language=tesseract_language,
     )
 
     report_progress(progress_callback, f"Running {mode.value} OCR on image...")
