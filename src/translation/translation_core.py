@@ -1,4 +1,5 @@
 # src/translation/translation_core.py
+# Uses an OpenAI-compatible chat completions API for translation.
 
 from __future__ import annotations
 
@@ -22,9 +23,9 @@ def report_progress(
         progress_callback(message)
 
 
-def normalize_lm_studio_base_url(model_path: str) -> str:
+def normalize_openai_compatible_base_url(model_path: str) -> str:
     if not model_path:
-        raise ValueError("No LM Studio server URL provided.")
+        raise ValueError("No OpenAI-compatible server URL provided.")
 
     server_url = model_path.rstrip("/")
     if server_url.endswith("/v1"):
@@ -41,7 +42,7 @@ def get_loaded_model_id(api_base_url: str) -> str:
     models = data.get("data", [])
 
     if not models:
-        raise ValueError("LM Studio returned no loaded models.")
+        raise ValueError("The OpenAI-compatible API returned no available models.")
 
     return models[0]["id"]
 
@@ -196,14 +197,14 @@ def split_text_into_chunks(text: str, max_chars: int = DEFAULT_CHUNK_CHAR_LIMIT)
     return chunks
 
 
-def translate_chunk_with_lm_studio(
+def translate_chunk_with_openai_compatible_api(
     chunk: str,
     model_path: str,
     target_language: str,
     chunk_number: int,
     total_chunks: int,
 ) -> str:
-    api_base_url = normalize_lm_studio_base_url(model_path)
+    api_base_url = normalize_openai_compatible_base_url(model_path)
     api_url = f"{api_base_url}/chat/completions"
     model_id = get_loaded_model_id(api_base_url)
 
@@ -236,13 +237,13 @@ def translate_chunk_with_lm_studio(
     response = requests.post(api_url, json=payload, timeout=300)
 
     if response.status_code >= 400:
-        raise RuntimeError(f"{response.status_code} error from LM Studio: {response.text}")
+        raise RuntimeError(f"{response.status_code} error from OpenAI-compatible API: {response.text}")
 
     data = response.json()
     return data["choices"][0]["message"]["content"].strip()
 
 
-def translate_text_with_lm_studio(
+def translate_text_with_openai_compatible_api(
     text: str,
     model_path: str,
     target_language: str,
@@ -257,7 +258,7 @@ def translate_text_with_lm_studio(
     for index, chunk in enumerate(chunks, start=1):
         report_progress(progress_callback, f"Translating chunk {index} of {len(chunks)}...")
         translations.append(
-            translate_chunk_with_lm_studio(
+            translate_chunk_with_openai_compatible_api(
                 chunk=chunk,
                 model_path=model_path,
                 target_language=target_language,
@@ -295,7 +296,7 @@ def translate_pdf(
         progress_callback=progress_callback,
     )
 
-    translated_text = translate_text_with_lm_studio(
+    translated_text = translate_text_with_openai_compatible_api(
         text=text,
         model_path=model_path,
         target_language=target_language,
