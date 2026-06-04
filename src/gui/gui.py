@@ -252,6 +252,20 @@ TASK_LABELS = {
 }
 
 
+TRANSLATION_TARGET_LANGUAGES = [
+    ("English", "English"),
+    ("German", "German"),
+    ("French", "French"),
+    ("Spanish", "Spanish"),
+    ("Italian", "Italian"),
+    ("Portuguese", "Portuguese"),
+    ("Dutch", "Dutch"),
+    ("Polish", "Polish"),
+    ("Russian", "Russian"),
+    ("Latin", "Latin"),
+]
+
+
 class Worker(QThread):
     progress = pyqtSignal(str)
     finished = pyqtSignal(str)
@@ -266,6 +280,7 @@ class Worker(QThread):
         preprocess_mode: str = "basic",
         save_page_images: bool = False,
         tesseract_language: str = "eng",
+        target_language: str = "English",
     ):
         super().__init__()
         self.tasks = tasks
@@ -275,8 +290,13 @@ class Worker(QThread):
         self.preprocess_mode = preprocess_mode
         self.save_page_images = save_page_images
         self.tesseract_language = tesseract_language
+        self.target_language = target_language
 
     def output_path_for(self, pdf_path: Path, task_name: str) -> Path:
+        if task_name == "translate":
+            safe_language = self.target_language.lower().replace(" ", "_")
+            return pdf_path.parent / f"{pdf_path.stem}_translated_{safe_language}.md"
+
         suffix = TASK_OUTPUT_SUFFIXES[task_name]
         return pdf_path.parent / f"{pdf_path.stem}{suffix}"
 
@@ -323,9 +343,14 @@ class Worker(QThread):
                     "could not be imported. Re-enable or implement the translation backend first."
                 )
             return translate_pdf(
-                pdf_path,
-                self.model_path,
-                self.progress.emit,
+                pdf_path=pdf_path,
+                model_path=self.model_path,
+                target_language=self.target_language,
+                progress_callback=self.progress.emit,
+                ocr_mode=self.ocr_mode or "extract_text",
+                preprocess_mode=self.preprocess_mode or "basic",
+                save_page_images=self.save_page_images,
+                tesseract_language=self.tesseract_language,
             )
 
         raise ValueError(f"Unknown task: {task_name}")
@@ -435,6 +460,10 @@ class HistorianToolkitGUI(QWidget):
         self.ocr_checkbox = QCheckBox("OCR")
         self.translate_checkbox = QCheckBox("Translate")
 
+        self.target_language_combo = QComboBox()
+        for label, value in TRANSLATION_TARGET_LANGUAGES:
+            self.target_language_combo.addItem(label, value)
+
         self.ocr_mode_combo = QComboBox()
         self.ocr_mode_combo.addItem("Extract pre-existing OCR text", "extract_text")
         self.ocr_mode_combo.addItem("Tesseract only", "tesseract")
@@ -459,6 +488,7 @@ class HistorianToolkitGUI(QWidget):
         self.save_images_checkbox.setChecked(False)
 
         self.ocr_checkbox.toggled.connect(self.update_ocr_options_enabled)
+        self.translate_checkbox.toggled.connect(self.update_ocr_options_enabled)
         self.ocr_mode_combo.currentIndexChanged.connect(self.update_ocr_options_enabled)
 
         self.process_button = QPushButton("Process Document(s)")
@@ -497,6 +527,13 @@ class HistorianToolkitGUI(QWidget):
         ocr_options_layout.addRow("", self.save_images_checkbox)
         self.ocr_options_group.setLayout(ocr_options_layout)
         main_layout.addWidget(self.ocr_options_group)
+
+        self.translation_options_group = QGroupBox("Translation Options")
+        translation_options_layout = QFormLayout()
+        translation_options_layout.addRow("Source language:", QLabel("Auto-detect"))
+        translation_options_layout.addRow("Target language:", self.target_language_combo)
+        self.translation_options_group.setLayout(translation_options_layout)
+        main_layout.addWidget(self.translation_options_group)
 
         action_layout = QHBoxLayout()
         action_layout.addWidget(self.process_button)
@@ -556,15 +593,25 @@ class HistorianToolkitGUI(QWidget):
     def selected_tesseract_language(self) -> str:
         return self.tesseract_language_combo.currentData() or "eng"
 
+    def selected_target_language(self) -> str:
+        return self.target_language_combo.currentData() or "English"
+
     def update_ocr_options_enabled(self):
         ocr_enabled = self.ocr_checkbox.isChecked()
+        translate_enabled = self.translate_checkbox.isChecked()
+        text_source_options_enabled = ocr_enabled or translate_enabled
         uses_tesseract = self.selected_ocr_mode() in {"tesseract", "tesseract_plus_vision"}
 
-        self.ocr_options_group.setEnabled(ocr_enabled)
-        self.ocr_mode_combo.setEnabled(ocr_enabled)
-        self.preprocess_combo.setEnabled(ocr_enabled)
-        self.save_images_checkbox.setEnabled(ocr_enabled)
-        self.tesseract_language_combo.setEnabled(ocr_enabled and uses_tesseract)
+        # Translation also needs these settings because scanned PDFs may need OCR
+        # before they can be sent to the LLM.
+        self.ocr_options_group.setEnabled(text_source_options_enabled)
+        self.ocr_mode_combo.setEnabled(text_source_options_enabled)
+        self.preprocess_combo.setEnabled(text_source_options_enabled)
+        self.save_images_checkbox.setEnabled(text_source_options_enabled)
+        self.tesseract_language_combo.setEnabled(text_source_options_enabled and uses_tesseract)
+
+        self.translation_options_group.setEnabled(translate_enabled)
+        self.target_language_combo.setEnabled(translate_enabled)
 
     def process_documents(self):
         if not self.pdf_paths:
@@ -614,12 +661,16 @@ class HistorianToolkitGUI(QWidget):
         self.log(f"Selected document(s): {len(self.pdf_paths)}")
         self.log("Selected task(s): " + ", ".join(TASK_LABELS[task] for task in tasks))
 
-        if "ocr" in tasks:
-            self.log(f"OCR method: {ocr_mode}")
+        if "ocr" in tasks or "translate" in tasks:
+            self.log(f"Text extraction/OCR method: {ocr_mode}")
             self.log(f"Image preprocessing: {self.selected_preprocess_mode()}")
             if ocr_mode in {"tesseract", "tesseract_plus_vision"}:
                 self.log(f"Tesseract language: {self.selected_tesseract_language()}")
             self.log(f"Save rendered page images: {self.save_images_checkbox.isChecked()}")
+
+        if "translate" in tasks:
+            self.log(f"Translation source language: Auto-detect")
+            self.log(f"Translation target language: {self.selected_target_language()}")
 
         self.worker = Worker(
             tasks=tasks,
@@ -629,6 +680,7 @@ class HistorianToolkitGUI(QWidget):
             preprocess_mode=self.selected_preprocess_mode(),
             save_page_images=self.save_images_checkbox.isChecked(),
             tesseract_language=self.selected_tesseract_language(),
+            target_language=self.selected_target_language(),
         )
 
         self.worker.progress.connect(self.log)
@@ -661,6 +713,7 @@ class HistorianToolkitGUI(QWidget):
             self.update_ocr_options_enabled()
         else:
             self.ocr_options_group.setEnabled(False)
+            self.translation_options_group.setEnabled(False)
 
     def log(self, message: str):
         self.progress_output.append(message)
