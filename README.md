@@ -21,7 +21,7 @@ Instead of relying on multiple disconnected tools and cloud services, the Histor
 - AI-assisted analysis and summarization
 - Batch processing of research collections
 
-All processing occurs locally using models hosted through LM Studio.
+All processing occurs locally using models hosted through LM Studio (or another OpenAI compatible API).
 
 ---
 
@@ -48,7 +48,7 @@ All processing occurs locally using models hosted through LM Studio.
 
 #### Vision-Language Model OCR
 
-- Uses multimodal AI models through LM Studio
+- Uses multimodal AI models
 - Better performance on difficult scans
 - Improved handling of historical documents
 - Better interpretation of complex layouts
@@ -59,7 +59,7 @@ All processing occurs locally using models hosted through LM Studio.
 - User-selectable target language
 - Batch translation of multiple PDFs
 - Preservation of document structure
-- Local processing through LM Studio
+- Local processing
 
 ### AI-Assisted Summarization
 
@@ -81,7 +81,7 @@ Outputs are generated in Markdown format and integrate easily with Obsidian, DEV
 
 Current support:
 
-- LM Studio
+- LM Studio or any other OpenAI compatible API
 
 ---
 
@@ -93,7 +93,7 @@ Current support:
    - Translation
    - Summarization
 3. Click **Process Document(s)**.
-4. Outputs are generated automatically.
+4. Output files are generated automatically.
 
 The toolkit automatically performs prerequisite steps when required.
 
@@ -133,32 +133,12 @@ document_summary.md
 
 ---
 
-## Technical Architecture
-
-```text
-src/
-├── gui/
-│   └── gui.py
-├── ocr/
-│   ├── ocr_core.py
-│   └── engines.py
-├── translation/
-├── summarization/
-├── extraction/
-├── llm/
-└── utilities/
-
-main.py
-```
-
----
-
 ## Installation
 
 ### Requirements
 
 - Python 3.10+
-- LM Studio
+- LM Studio or Ollama
 - Local language model
 - Local multimodal model (for Vision OCR)
 
@@ -171,7 +151,7 @@ pip install -r requirements.txt
 ### Launch Application
 
 ```bash
-python main.py
+python3 -m src.main
 ```
 
 ---
@@ -185,19 +165,6 @@ python main.py
 - Graduate students
 - Researchers working with scanned documents
 
----
-
-## Roadmap
-
-- Named entity recognition
-- Metadata extraction
-- Citation extraction
-- Topic modeling
-- Archival document classification
-- Research-note generation
-- Zotero integration
-- DEVONthink integration
-- Handwriting recognition
 
 ---
 
